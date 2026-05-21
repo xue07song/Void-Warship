@@ -1,160 +1,218 @@
-import java.util.*;
-import java.util.concurrent.*;
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Random;
 
 /**
- * 控制台飞机躲避障碍物游戏
- * 玩法：飞机用 '^' 表示，障碍物用 '#' 表示，按 A/D 后按回车左右移动飞机
- * 每成功躲避一个障碍物（障碍物移出屏幕底部）得 10 分
- * 碰到障碍物游戏结束
+ * Swing 图形版飞机躲避障碍物游戏
+ * 玩法：使用 W/A/S/D 或方向键控制飞机移动，避开红色障碍物
+ * 每成功躲避一个障碍物得 10 分，碰到障碍物游戏结束
  */
-public class PlaneDodgeGame {
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Random;
+
+/**
+ * Swing 图形版飞机躲避障碍物游戏
+ * 玩法：使用 W/A/S/D 或方向键控制飞机移动，避开红色障碍物
+ * 每成功躲避一个障碍物得 10 分，碰到障碍物游戏结束
+ */
+public class PlaneDodgeGame extends JFrame implements KeyListener, ActionListener {
     // 游戏区域尺寸
-    private static final int WIDTH = 20;
-    private static final int HEIGHT = 10;      // 飞机固定在底部，所以障碍物活动高度为 HEIGHT-1
-    private static final int PLAYER_Y = HEIGHT - 1;  // 飞机固定在最下面一行
-
+    private static final int WIDTH = 600;
+    private static final int HEIGHT = 500;
+    
+    // 飞机尺寸
+    private static final int PLANE_WIDTH = 40;
+    private static final int PLANE_HEIGHT = 40;
+    
+    // 障碍物尺寸
+    private static final int OBSTACLE_WIDTH = 30;
+    private static final int OBSTACLE_HEIGHT = 30;
+    
+    // 移动速度
+    private static final int MOVE_SPEED = 10;
+    private static final int OBSTACLE_SPEED = 5;
+    
     // 游戏状态
-    private static int playerX = WIDTH / 2;      // 飞机水平位置
-    private static int score = 0;
-    private static boolean gameRunning = true;
+    private int playerX;
+    private int playerY;
+    private int score = 0;
+    private boolean gameRunning = true;
+    
+    // 障碍物列表：每个障碍物是一个(x, y)坐标
+    private final List<int[]> obstacles = new ArrayList<>();
+    private final Random rand = new Random();
+    
+    // 游戏定时器：每 50ms 更新一次
+    private Timer gameTimer;
+    
+    // 按键状态
+    private boolean keyUp = false;
+    private boolean keyDown = false;
+    private boolean keyLeft = false;
+    private boolean keyRight = false;
 
-    // 障碍物列表：每个障碍物是一个(x, y)坐标，y从0开始向下增加
-    private static final List<int[]> obstacles = new ArrayList<>();
-    private static final Random rand = new Random();
+    public PlaneDodgeGame() {
+        // 初始化飞机位置（底部中央）
+        playerX = (WIDTH - PLANE_WIDTH) / 2;
+        playerY = HEIGHT - PLANE_HEIGHT - 10;
+        
+        // 设置窗口
+        setTitle("飞机躲避障碍物");
+        setSize(WIDTH, HEIGHT);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+        setResizable(false);
+        
+        // 添加键盘监听
+        addKeyListener(this);
+        setFocusable(true);
+        
+        // 创建定时器：每 50ms 更新一次游戏状态
+        gameTimer = new Timer(50, this);
+        gameTimer.start();
+        
+        setVisible(true);
+    }
 
-    // 定时器：每 500 毫秒更新一次障碍物位置并重绘
-    private static ScheduledExecutorService scheduler;
+    @Override
+    public void actionPerformed(ActionEvent e) {
+        if (!gameRunning) return;
+        
+        // 1. 根据按键状态移动飞机
+        if (keyUp) playerY = Math.max(0, playerY - MOVE_SPEED);
+        if (keyDown) playerY = Math.min(HEIGHT - PLANE_HEIGHT, playerY + MOVE_SPEED);
+        if (keyLeft) playerX = Math.max(0, playerX - MOVE_SPEED);
+        if (keyRight) playerX = Math.min(WIDTH - PLANE_WIDTH, playerX + MOVE_SPEED);
+        
+        // 2. 移动所有障碍物向下
+        Iterator<int[]> iter = obstacles.iterator();
+        while (iter.hasNext()) {
+            int[] ob = iter.next();
+            ob[1] += OBSTACLE_SPEED;
+            if (ob[1] >= HEIGHT) {  // 超出底部，成功躲避
+                iter.remove();
+                score += 10;
+            }
+        }
+        
+        // 3. 随机生成新障碍物（约15%概率）
+        if (rand.nextInt(7) == 0) {
+            int newX = rand.nextInt(WIDTH - OBSTACLE_WIDTH);
+            // 避免同一位置连续生成
+            boolean alreadyHas = false;
+            for (int[] ob : obstacles) {
+                if (Math.abs(ob[0] - newX) < OBSTACLE_WIDTH && ob[1] < 60) {
+                    alreadyHas = true;
+                    break;
+                }
+            }
+            if (!alreadyHas) {
+                obstacles.add(new int[]{newX, 0});
+            }
+        }
+        
+        // 4. 碰撞检测：飞机与障碍物矩形相交
+        Rectangle playerRect = new Rectangle(playerX, playerY, PLANE_WIDTH, PLANE_HEIGHT);
+        for (int[] ob : obstacles) {
+            Rectangle obRect = new Rectangle(ob[0], ob[1], OBSTACLE_WIDTH, OBSTACLE_HEIGHT);
+            if (playerRect.intersects(obRect)) {
+                gameRunning = false;
+                gameTimer.stop();
+                JOptionPane.showMessageDialog(this, "游戏结束！最终得分：" + score);
+                return;
+            }
+        }
+        
+        // 5. 刷新画面
+        repaint();
+    }
+
+    @Override
+    public void paint(Graphics g) {
+        // 清空画布，黑色背景
+        g.setColor(Color.BLACK);
+        g.fillRect(0, 0, WIDTH, HEIGHT);
+        
+        // 绘制得分和操作提示
+        g.setColor(Color.WHITE);
+        g.setFont(new Font("Arial", Font.PLAIN, 16));
+        g.drawString("得分: " + score, 10, 25);
+        g.drawString("操作: W/A/S/D 或 方向键移动", 10, 45);
+        
+        // 绘制飞机：蓝色矩形 + 白色边框
+        g.setColor(Color.BLUE);
+        g.fillRect(playerX, playerY, PLANE_WIDTH, PLANE_HEIGHT);
+        g.setColor(Color.WHITE);
+        g.drawRect(playerX, playerY, PLANE_WIDTH, PLANE_HEIGHT);
+        
+        // 绘制障碍物：红色矩形
+        g.setColor(Color.RED);
+        for (int[] ob : obstacles) {
+            g.fillRect(ob[0], ob[1], OBSTACLE_WIDTH, OBSTACLE_HEIGHT);
+        }
+    }
+
+    @Override
+    public void keyPressed(KeyEvent e) {
+        int key = e.getKeyCode();
+        switch (key) {
+            case KeyEvent.VK_W:
+            case KeyEvent.VK_UP:
+                keyUp = true;
+                break;
+            case KeyEvent.VK_S:
+            case KeyEvent.VK_DOWN:
+                keyDown = true;
+                break;
+            case KeyEvent.VK_A:
+            case KeyEvent.VK_LEFT:
+                keyLeft = true;
+                break;
+            case KeyEvent.VK_D:
+            case KeyEvent.VK_RIGHT:
+                keyRight = true;
+                break;
+        }
+    }
+
+    @Override
+    public void keyReleased(KeyEvent e) {
+        int key = e.getKeyCode();
+        switch (key) {
+            case KeyEvent.VK_W:
+            case KeyEvent.VK_UP:
+                keyUp = false;
+                break;
+            case KeyEvent.VK_S:
+            case KeyEvent.VK_DOWN:
+                keyDown = false;
+                break;
+            case KeyEvent.VK_A:
+            case KeyEvent.VK_LEFT:
+                keyLeft = false;
+                break;
+            case KeyEvent.VK_D:
+            case KeyEvent.VK_RIGHT:
+                keyRight = false;
+                break;
+        }
+    }
+
+    @Override
+    public void keyTyped(KeyEvent e) {
+        // 不需要处理
+    }
 
     public static void main(String[] args) {
-        System.out.println("=== 飞机躲避障碍物游戏 ===");
-        System.out.println("规则：飞机在底部(^)，障碍物(#)从上往下落。");
-        System.out.println("按 A (左) / D (右) 然后回车移动飞机，避开障碍物。");
-        System.out.println("每成功躲避一个障碍物得10分。碰到障碍物游戏结束。");
-        System.out.println("按任意回车开始游戏...");
-        new Scanner(System.in).nextLine();
-
-        // 启动游戏定时器：每0.5秒更新并重绘
-        scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleAtFixedRate(new GameUpdater(), 0, 500, TimeUnit.MILLISECONDS);
-
-        // 主线程负责读取玩家输入
-        try (Scanner scanner = new Scanner(System.in)) {
-            while (gameRunning) {
-                String input = scanner.nextLine().trim();
-                if (!gameRunning) break;
-
-                // 处理移动
-                if (input.equalsIgnoreCase("A")) {
-                    if (playerX > 0) playerX--;
-                } else if (input.equalsIgnoreCase("D")) {
-                    if (playerX < WIDTH - 1) playerX++;
-                }
-                // 移动后立即重绘（让玩家立刻看到位置变化）
-                drawGame();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        // 游戏结束，停止定时器
-        if (scheduler != null && !scheduler.isShutdown()) {
-            scheduler.shutdownNow();
-        }
-        System.out.println("\n游戏结束！最终得分：" + score);
-    }
-
-    /**
-     * 游戏逻辑更新（由定时器调用）
-     */
-    static class GameUpdater implements Runnable {
-        @Override
-        public void run() {
-            if (!gameRunning) return;
-
-            // 1. 移动所有障碍物向下
-            Iterator<int[]> iter = obstacles.iterator();
-            while (iter.hasNext()) {
-                int[] ob = iter.next();
-                ob[1]++;   // y坐标增加
-                if (ob[1] >= HEIGHT) {  // 超出底部，说明被成功躲避
-                    iter.remove();
-                    score += 10;
-                }
-            }
-
-            // 2. 随机生成新障碍物（约20%概率，且同一列最多一个）
-            if (rand.nextInt(5) == 0) {
-                int newX = rand.nextInt(WIDTH);
-                // 避免同一列连续过多障碍物（可选，让游戏更公平）
-                boolean alreadyHas = false;
-                for (int[] ob : obstacles) {
-                    if (ob[0] == newX && ob[1] < 2) { // 顶部附近已有，暂不生成
-                        alreadyHas = true;
-                        break;
-                    }
-                }
-                if (!alreadyHas) {
-                    obstacles.add(new int[]{newX, 0}); // 从顶部出现
-                }
-            }
-
-            // 3. 碰撞检测：飞机与任何障碍物重合
-            for (int[] ob : obstacles) {
-                if (ob[0] == playerX && ob[1] == PLAYER_Y) {
-                    gameRunning = false;
-                    scheduler.shutdownNow();
-                    drawGame();  // 最后一次显示画面
-                    return;
-                }
-            }
-
-            // 4. 刷新画面
-            drawGame();
-        }
-    }
-
-    /**
-     * 清屏并绘制当前游戏画面
-     */
-    private static void drawGame() {
-        // 使用 ANSI 转义序列清屏 (大多数现代终端支持，如Windows Terminal、CMD、Linux、macOS)
-        System.out.print("\033[H\033[2J");
-        System.out.flush();
-
-        // 构建游戏画布 (二维字符数组)
-        char[][] canvas = new char[HEIGHT][WIDTH];
-        for (int y = 0; y < HEIGHT; y++) {
-            Arrays.fill(canvas[y], ' ');
-        }
-
-        // 绘制障碍物
-        for (int[] ob : obstacles) {
-            int x = ob[0];
-            int y = ob[1];
-            if (y >= 0 && y < HEIGHT && x >= 0 && x < WIDTH) {
-                canvas[y][x] = '#';
-            }
-        }
-
-        // 绘制飞机
-        if (playerX >= 0 && playerX < WIDTH) {
-            canvas[PLAYER_Y][playerX] = '^';
-        }
-
-        // 输出画布和分数
-        StringBuilder sb = new StringBuilder();
-        sb.append("Score: ").append(score).append("\n");
-        sb.append("+").append("-".repeat(WIDTH)).append("+\n");
-        for (int y = 0; y < HEIGHT; y++) {
-            sb.append("|");
-            for (int x = 0; x < WIDTH; x++) {
-                sb.append(canvas[y][x]);
-            }
-            sb.append("|\n");
-        }
-        sb.append("+").append("-".repeat(WIDTH)).append("+\n");
-        sb.append("Controls: [A] left  [D] right  (press Enter after each move)\n");
-
-        System.out.print(sb.toString());
+        new PlaneDodgeGame();
     }
 }
