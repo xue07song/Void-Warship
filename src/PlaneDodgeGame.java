@@ -131,6 +131,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     private static final int BULLET_SIZE = 10;
     
     private int playerX = WIDTH/2 - PLAYER_SIZE/2;
+    private int playerY = HEIGHT - PLAYER_SIZE - 10;
     private int lives = 3;
     private int score = 0;
     private boolean gameRunning = true;
@@ -161,6 +162,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         lives = 3;
         score = 0;
         playerX = WIDTH/2 - PLAYER_SIZE/2;
+        playerY = HEIGHT - PLAYER_SIZE - 10;
         obstacles.clear();
         bullets.clear();
         if (gameTimer != null) {
@@ -219,8 +221,8 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             obstacles.add(new Rectangle(x, 0, OBSTACLE_SIZE, OBSTACLE_SIZE));
         }
         
-        // 碰撞检测
-        Rectangle playerRect = new Rectangle(playerX, HEIGHT - PLAYER_SIZE - 10, PLAYER_SIZE, PLAYER_SIZE);
+                // 碰撞检测
+        Rectangle playerRect = new Rectangle(playerX, playerY, PLAYER_SIZE, PLAYER_SIZE);
         Iterator<Rectangle> itColl = obstacles.iterator();
         boolean damaged = false;
         while (itColl.hasNext()) {
@@ -267,7 +269,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             g.fillOval(b.x, b.y, BULLET_SIZE, BULLET_SIZE);
         }
         
-        // 飞机（绿色三角形）
+                // 飞机（绿色三角形）
         g.setColor(Color.GREEN);
         int[] xPoints = {
             playerX + PLAYER_SIZE/2,
@@ -275,9 +277,9 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             playerX + 5
         };
         int[] yPoints = {
-            HEIGHT - PLAYER_SIZE - 10,
-            HEIGHT - 10,
-            HEIGHT - 10
+            playerY,
+            playerY + PLAYER_SIZE - 5,
+            playerY + PLAYER_SIZE - 5
         };
         g.fillPolygon(xPoints, yPoints, 3);
         
@@ -287,20 +289,24 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         g.drawString("❤️ 生命: " + lives, 20, 40);
         g.drawString("⭐ 得分: " + score, 20, 80);
         g.drawString("🏆 最高分: " + loadHighScore(), 20, 120);
-        g.drawString("🎮 操作: [A]左移  [D]右移  [J]射击", 20, 160);
+        g.drawString("🎮 操作: [WASD/方向键]移动  [J/空格]射击", 20, 160);
     }
     
-    @Override
+        @Override
     public void keyPressed(KeyEvent e) {
         if (!gameRunning) return;
         int step = 15;
-        if (e.getKeyCode() == KeyEvent.VK_A) {
+        if (e.getKeyCode() == KeyEvent.VK_A || e.getKeyCode() == KeyEvent.VK_LEFT) {
             playerX = Math.max(0, playerX - step);
-        } else if (e.getKeyCode() == KeyEvent.VK_D) {
+        } else if (e.getKeyCode() == KeyEvent.VK_D || e.getKeyCode() == KeyEvent.VK_RIGHT) {
             playerX = Math.min(WIDTH - PLAYER_SIZE, playerX + step);
-        } else if (e.getKeyCode() == KeyEvent.VK_J) {
+        } else if (e.getKeyCode() == KeyEvent.VK_W || e.getKeyCode() == KeyEvent.VK_UP) {
+            playerY = Math.max(0, playerY - step);
+        } else if (e.getKeyCode() == KeyEvent.VK_S || e.getKeyCode() == KeyEvent.VK_DOWN) {
+            playerY = Math.min(HEIGHT - PLAYER_SIZE, playerY + step);
+        } else if (e.getKeyCode() == KeyEvent.VK_J || e.getKeyCode() == KeyEvent.VK_SPACE) {
             int bulletX = playerX + PLAYER_SIZE/2 - BULLET_SIZE/2;
-            bullets.add(new Rectangle(bulletX, HEIGHT - PLAYER_SIZE - 20, BULLET_SIZE, BULLET_SIZE));
+            bullets.add(new Rectangle(bulletX, playerY - 10, BULLET_SIZE, BULLET_SIZE));
         }
         repaint();
     }
