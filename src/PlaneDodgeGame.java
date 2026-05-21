@@ -285,7 +285,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             playerY + PLAYER_SIZE - 5
         };
         g.fillPolygon(xPoints, yPoints, 3);
-        
+      
         // UI文字
         g.setColor(Color.WHITE);
         g.setFont(new Font("微软雅黑", Font.BOLD, 20));
