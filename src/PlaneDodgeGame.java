@@ -1,218 +1,329 @@
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
-import java.util.ArrayList;
-import java.util.Iterator;
+import java.io.*;
+import java.util.*;
 import java.util.List;
-import java.util.Random;
 
-/**
- * Swing 图形版飞机躲避障碍物游戏
- * 玩法：使用 W/A/S/D 或方向键控制飞机移动，避开红色障碍物
- * 每成功躲避一个障碍物得 10 分，碰到障碍物游戏结束
- */
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Random;
+public class PlaneDodgeGame extends JFrame {
+    private CardLayout cardLayout;
+    private JPanel mainPanel;
+    private MenuPanel menuPanel;
+    private GamePanel gamePanel;
 
-/**
- * Swing 图形版飞机躲避障碍物游戏
- * 玩法：使用 W/A/S/D 或方向键控制飞机移动，避开红色障碍物
- * 每成功躲避一个障碍物得 10 分，碰到障碍物游戏结束
- */
-public class PlaneDodgeGame extends JFrame implements KeyListener, ActionListener {
-    // 游戏区域尺寸
-    private static final int WIDTH = 600;
-    private static final int HEIGHT = 500;
+    public PlaneDodgeGame() {
+        setTitle("飞机躲避障碍物");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setResizable(false);
+        
+        cardLayout = new CardLayout();
+        mainPanel = new JPanel(cardLayout);
+        
+        menuPanel = new MenuPanel(this);
+        gamePanel = new GamePanel(this);
+        
+        mainPanel.add(menuPanel, "menu");
+        mainPanel.add(gamePanel, "game");
+        
+        add(mainPanel);
+        pack();
+        setLocationRelativeTo(null);
+    }
     
-    // 飞机尺寸
-    private static final int PLANE_WIDTH = 40;
-    private static final int PLANE_HEIGHT = 40;
+    public void showGame() {
+        gamePanel.resetGame();
+        cardLayout.show(mainPanel, "game");
+        gamePanel.requestFocusInWindow();
+        gamePanel.startGame();
+    }
     
-    // 障碍物尺寸
-    private static final int OBSTACLE_WIDTH = 30;
-    private static final int OBSTACLE_HEIGHT = 30;
+    public void showMenu() {
+        cardLayout.show(mainPanel, "menu");
+        menuPanel.updateHighScore();
+    }
     
-    // 移动速度
-    private static final int MOVE_SPEED = 10;
-    private static final int OBSTACLE_SPEED = 5;
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            new PlaneDodgeGame().setVisible(true);
+        });
+    }
+}
+
+class MenuPanel extends JPanel {
+    private PlaneDodgeGame game;
+    private JLabel highScoreLabel;
+    private JComboBox<String> difficultyCombo;
     
-    // 游戏状态
-    private int playerX;
-    private int playerY;
+    public MenuPanel(PlaneDodgeGame game) {
+        this.game = game;
+        setPreferredSize(new Dimension(800, 600));
+        setBackground(new Color(20, 20, 40));
+        setLayout(new GridBagLayout());
+        
+        JLabel title = new JLabel("✈ 飞机躲避障碍物 ✈");
+        title.setFont(new Font("微软雅黑", Font.BOLD, 36));
+        title.setForeground(Color.WHITE);
+        
+        JLabel diffLabel = new JLabel("选择难度：");
+        diffLabel.setFont(new Font("微软雅黑", Font.PLAIN, 20));
+        diffLabel.setForeground(Color.WHITE);
+        String[] difficulties = {"简单 (慢速)", "普通 (中速)", "困难 (快速)"};
+        difficultyCombo = new JComboBox<>(difficulties);
+        difficultyCombo.setFont(new Font("微软雅黑", Font.PLAIN, 18));
+        
+        JButton startBtn = new JButton("开始游戏");
+        startBtn.setFont(new Font("微软雅黑", Font.BOLD, 24));
+        startBtn.setBackground(new Color(0, 150, 0));
+        startBtn.setForeground(Color.WHITE);
+        startBtn.addActionListener(e -> {
+            int diff = difficultyCombo.getSelectedIndex();
+            GamePanel.setDifficulty(diff);
+            game.showGame();
+        });
+        
+        JButton exitBtn = new JButton("退出游戏");
+        exitBtn.setFont(new Font("微软雅黑", Font.BOLD, 20));
+        exitBtn.addActionListener(e -> System.exit(0));
+        
+        int high = loadHighScore();
+        highScoreLabel = new JLabel("🏆 最高分: " + high);
+        highScoreLabel.setFont(new Font("微软雅黑", Font.PLAIN, 20));
+        highScoreLabel.setForeground(Color.YELLOW);
+        
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(15, 15, 15, 15);
+        gbc.gridx = 0; gbc.gridy = 0;
+        add(title, gbc);
+        gbc.gridy = 1;
+        add(diffLabel, gbc);
+        gbc.gridy = 2;
+        add(difficultyCombo, gbc);
+        gbc.gridy = 3;
+        add(startBtn, gbc);
+        gbc.gridy = 4;
+        add(highScoreLabel, gbc);
+        gbc.gridy = 5;
+        add(exitBtn, gbc);
+    }
+    
+    private int loadHighScore() {
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream("score.dat"))) {
+            return (int) ois.readObject();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+    
+    public void updateHighScore() {
+        highScoreLabel.setText("🏆 最高分: " + loadHighScore());
+    }
+}
+
+class GamePanel extends JPanel implements KeyListener, ActionListener {
+    private PlaneDodgeGame game;
+    private static int speedMs = 500;
+    private javax.swing.Timer gameTimer;  // 关键修复：明确指定是 Swing 的 Timer
+    
+    private static final int WIDTH = 800;
+    private static final int HEIGHT = 600;
+    private static final int PLAYER_SIZE = 40;
+    private static final int OBSTACLE_SIZE = 40;
+    private static final int BULLET_SIZE = 10;
+    
+    private int playerX = WIDTH/2 - PLAYER_SIZE/2;
+    private int lives = 3;
     private int score = 0;
     private boolean gameRunning = true;
     
-    // 障碍物列表：每个障碍物是一个(x, y)坐标
-    private final List<int[]> obstacles = new ArrayList<>();
-    private final Random rand = new Random();
+    private List<Rectangle> obstacles = new ArrayList<>();
+    private List<Rectangle> bullets = new ArrayList<>();
+    private Random rand = new Random();
     
-    // 游戏定时器：每 50ms 更新一次
-    private Timer gameTimer;
-    
-    // 按键状态
-    private boolean keyUp = false;
-    private boolean keyDown = false;
-    private boolean keyLeft = false;
-    private boolean keyRight = false;
-
-    public PlaneDodgeGame() {
-        // 初始化飞机位置（底部中央）
-        playerX = (WIDTH - PLANE_WIDTH) / 2;
-        playerY = HEIGHT - PLANE_HEIGHT - 10;
-        
-        // 设置窗口
-        setTitle("飞机躲避障碍物");
-        setSize(WIDTH, HEIGHT);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setLocationRelativeTo(null);
-        setResizable(false);
-        
-        // 添加键盘监听
-        addKeyListener(this);
+    public GamePanel(PlaneDodgeGame game) {
+        this.game = game;
+        setPreferredSize(new Dimension(WIDTH, HEIGHT));
         setFocusable(true);
-        
-        // 创建定时器：每 50ms 更新一次游戏状态
-        gameTimer = new Timer(50, this);
-        gameTimer.start();
-        
-        setVisible(true);
+        addKeyListener(this);
+        setBackground(Color.BLACK);
     }
-
+    
+    public static void setDifficulty(int diff) {
+        switch(diff) {
+            case 0: speedMs = 800; break;
+            case 1: speedMs = 500; break;
+            case 2: speedMs = 300; break;
+            default: speedMs = 500;
+        }
+    }
+    
+    public void resetGame() {
+        gameRunning = true;
+        lives = 3;
+        score = 0;
+        playerX = WIDTH/2 - PLAYER_SIZE/2;
+        obstacles.clear();
+        bullets.clear();
+        if (gameTimer != null) {
+            gameTimer.stop();
+        }
+    }
+    
+    public void startGame() {
+        gameTimer = new javax.swing.Timer(speedMs, this);
+        gameTimer.start();
+    }
+    
     @Override
     public void actionPerformed(ActionEvent e) {
         if (!gameRunning) return;
         
-        // 1. 根据按键状态移动飞机
-        if (keyUp) playerY = Math.max(0, playerY - MOVE_SPEED);
-        if (keyDown) playerY = Math.min(HEIGHT - PLANE_HEIGHT, playerY + MOVE_SPEED);
-        if (keyLeft) playerX = Math.max(0, playerX - MOVE_SPEED);
-        if (keyRight) playerX = Math.min(WIDTH - PLANE_WIDTH, playerX + MOVE_SPEED);
-        
-        // 2. 移动所有障碍物向下
-        Iterator<int[]> iter = obstacles.iterator();
-        while (iter.hasNext()) {
-            int[] ob = iter.next();
-            ob[1] += OBSTACLE_SPEED;
-            if (ob[1] >= HEIGHT) {  // 超出底部，成功躲避
-                iter.remove();
+        // 移动障碍物
+        Iterator<Rectangle> itObs = obstacles.iterator();
+        while (itObs.hasNext()) {
+            Rectangle ob = itObs.next();
+            ob.y += 40;
+            if (ob.y >= HEIGHT) {
+                itObs.remove();
                 score += 10;
             }
         }
         
-        // 3. 随机生成新障碍物（约15%概率）
-        if (rand.nextInt(7) == 0) {
-            int newX = rand.nextInt(WIDTH - OBSTACLE_WIDTH);
-            // 避免同一位置连续生成
-            boolean alreadyHas = false;
-            for (int[] ob : obstacles) {
-                if (Math.abs(ob[0] - newX) < OBSTACLE_WIDTH && ob[1] < 60) {
-                    alreadyHas = true;
-                    break;
-                }
-            }
-            if (!alreadyHas) {
-                obstacles.add(new int[]{newX, 0});
+        // 移动子弹
+        Iterator<Rectangle> itBul = bullets.iterator();
+        while (itBul.hasNext()) {
+            Rectangle b = itBul.next();
+            b.y -= 20;
+            if (b.y + BULLET_SIZE < 0) {
+                itBul.remove();
             }
         }
         
-        // 4. 碰撞检测：飞机与障碍物矩形相交
-        Rectangle playerRect = new Rectangle(playerX, playerY, PLANE_WIDTH, PLANE_HEIGHT);
-        for (int[] ob : obstacles) {
-            Rectangle obRect = new Rectangle(ob[0], ob[1], OBSTACLE_WIDTH, OBSTACLE_HEIGHT);
-            if (playerRect.intersects(obRect)) {
+        // 子弹碰撞障碍物
+        for (int i = bullets.size() - 1; i >= 0; i--) {
+            Rectangle bullet = bullets.get(i);
+            for (int j = obstacles.size() - 1; j >= 0; j--) {
+                Rectangle ob = obstacles.get(j);
+                if (bullet.intersects(ob)) {
+                    obstacles.remove(j);
+                    bullets.remove(i);
+                    score += 20;
+                    break;
+                }
+            }
+        }
+        
+        // 生成新障碍物
+        int prob = (speedMs <= 400) ? 12 : 20;
+        if (rand.nextInt(prob) == 0) {
+            int x = rand.nextInt(WIDTH - OBSTACLE_SIZE);
+            obstacles.add(new Rectangle(x, 0, OBSTACLE_SIZE, OBSTACLE_SIZE));
+        }
+        
+        // 碰撞检测
+        Rectangle playerRect = new Rectangle(playerX, HEIGHT - PLAYER_SIZE - 10, PLAYER_SIZE, PLAYER_SIZE);
+        Iterator<Rectangle> itColl = obstacles.iterator();
+        boolean damaged = false;
+        while (itColl.hasNext()) {
+            Rectangle ob = itColl.next();
+            if (playerRect.intersects(ob)) {
+                itColl.remove();
+                damaged = true;
+            }
+        }
+        
+        if (damaged) {
+            lives--;
+            if (lives <= 0) {
                 gameRunning = false;
                 gameTimer.stop();
-                JOptionPane.showMessageDialog(this, "游戏结束！最终得分：" + score);
+                int high = loadHighScore();
+                if (score > high) {
+                    saveHighScore(score);
+                }
+                JOptionPane.showMessageDialog(this, "游戏结束！得分: " + score);
+                game.showMenu();
                 return;
             }
         }
         
-        // 5. 刷新画面
         repaint();
     }
-
+    
     @Override
-    public void paint(Graphics g) {
-        // 清空画布，黑色背景
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
         g.setColor(Color.BLACK);
         g.fillRect(0, 0, WIDTH, HEIGHT);
         
-        // 绘制得分和操作提示
-        g.setColor(Color.WHITE);
-        g.setFont(new Font("Arial", Font.PLAIN, 16));
-        g.drawString("得分: " + score, 10, 25);
-        g.drawString("操作: W/A/S/D 或 方向键移动", 10, 45);
-        
-        // 绘制飞机：蓝色矩形 + 白色边框
-        g.setColor(Color.BLUE);
-        g.fillRect(playerX, playerY, PLANE_WIDTH, PLANE_HEIGHT);
-        g.setColor(Color.WHITE);
-        g.drawRect(playerX, playerY, PLANE_WIDTH, PLANE_HEIGHT);
-        
-        // 绘制障碍物：红色矩形
+        // 障碍物（红色方块）
         g.setColor(Color.RED);
-        for (int[] ob : obstacles) {
-            g.fillRect(ob[0], ob[1], OBSTACLE_WIDTH, OBSTACLE_HEIGHT);
+        for (Rectangle ob : obstacles) {
+            g.fillRect(ob.x, ob.y, OBSTACLE_SIZE, OBSTACLE_SIZE);
         }
+        
+        // 子弹（黄色圆形）
+        g.setColor(Color.YELLOW);
+        for (Rectangle b : bullets) {
+            g.fillOval(b.x, b.y, BULLET_SIZE, BULLET_SIZE);
+        }
+        
+        // 飞机（绿色三角形）
+        g.setColor(Color.GREEN);
+        int[] xPoints = {
+            playerX + PLAYER_SIZE/2,
+            playerX + PLAYER_SIZE - 5,
+            playerX + 5
+        };
+        int[] yPoints = {
+            HEIGHT - PLAYER_SIZE - 10,
+            HEIGHT - 10,
+            HEIGHT - 10
+        };
+        g.fillPolygon(xPoints, yPoints, 3);
+        
+        // UI文字
+        g.setColor(Color.WHITE);
+        g.setFont(new Font("微软雅黑", Font.BOLD, 20));
+        g.drawString("❤️ 生命: " + lives, 20, 40);
+        g.drawString("⭐ 得分: " + score, 20, 80);
+        g.drawString("🏆 最高分: " + loadHighScore(), 20, 120);
+        g.drawString("🎮 操作: [A]左移  [D]右移  [J]射击", 20, 160);
     }
-
+    
     @Override
     public void keyPressed(KeyEvent e) {
-        int key = e.getKeyCode();
-        switch (key) {
-            case KeyEvent.VK_W:
-            case KeyEvent.VK_UP:
-                keyUp = true;
-                break;
-            case KeyEvent.VK_S:
-            case KeyEvent.VK_DOWN:
-                keyDown = true;
-                break;
-            case KeyEvent.VK_A:
-            case KeyEvent.VK_LEFT:
-                keyLeft = true;
-                break;
-            case KeyEvent.VK_D:
-            case KeyEvent.VK_RIGHT:
-                keyRight = true;
-                break;
+        if (!gameRunning) return;
+        int step = 15;
+        if (e.getKeyCode() == KeyEvent.VK_A) {
+            playerX = Math.max(0, playerX - step);
+        } else if (e.getKeyCode() == KeyEvent.VK_D) {
+            playerX = Math.min(WIDTH - PLAYER_SIZE, playerX + step);
+        } else if (e.getKeyCode() == KeyEvent.VK_J) {
+            int bulletX = playerX + PLAYER_SIZE/2 - BULLET_SIZE/2;
+            bullets.add(new Rectangle(bulletX, HEIGHT - PLAYER_SIZE - 20, BULLET_SIZE, BULLET_SIZE));
+        }
+        repaint();
+    }
+    
+    @Override
+    public void keyReleased(KeyEvent e) {}
+    
+    @Override
+    public void keyTyped(KeyEvent e) {}
+    
+    private int loadHighScore() {
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream("score.dat"))) {
+            return (int) ois.readObject();
+        } catch (Exception e) {
+            return 0;
         }
     }
-
-    @Override
-    public void keyReleased(KeyEvent e) {
-        int key = e.getKeyCode();
-        switch (key) {
-            case KeyEvent.VK_W:
-            case KeyEvent.VK_UP:
-                keyUp = false;
-                break;
-            case KeyEvent.VK_S:
-            case KeyEvent.VK_DOWN:
-                keyDown = false;
-                break;
-            case KeyEvent.VK_A:
-            case KeyEvent.VK_LEFT:
-                keyLeft = false;
-                break;
-            case KeyEvent.VK_D:
-            case KeyEvent.VK_RIGHT:
-                keyRight = false;
-                break;
+    
+    private void saveHighScore(int highScore) {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream("score.dat"))) {
+            oos.writeObject(highScore);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-    }
-
-    @Override
-    public void keyTyped(KeyEvent e) {
-        // 不需要处理
-    }
-
-    public static void main(String[] args) {
-        new PlaneDodgeGame();
     }
 }
