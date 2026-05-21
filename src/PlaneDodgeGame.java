@@ -122,7 +122,8 @@ class MenuPanel extends JPanel {
 class GamePanel extends JPanel implements KeyListener, ActionListener {
     private PlaneDodgeGame game;
     private static int speedMs = 500;
-    private javax.swing.Timer gameTimer;  // 关键修复：明确指定是 Swing 的 Timer
+    private javax.swing.Timer gameTimer;  // 游戏主定时器
+    private javax.swing.Timer starTimer;  // 星星闪烁定时器
     
     private static final int WIDTH = 800;
     private static final int HEIGHT = 600;
@@ -136,12 +137,43 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     private int score = 0;
     private boolean gameRunning = true;
     
-        private Set<Integer> pressedKeys = new HashSet<>();
+    private Set<Integer> pressedKeys = new HashSet<>();
     private static final double DIAGONAL_FACTOR = 0.7071067811865475; // 1/√2，斜向速度归一化
     
     private List<Rectangle> obstacles = new ArrayList<>();
     private List<Rectangle> bullets = new ArrayList<>();
+    private List<Star> stars = new ArrayList<>();
     private Random rand = new Random();
+    
+    // 星星类 - 用于星光闪烁特效
+    private class Star {
+        int x, y;        // 位置
+        int size;        // 大小
+        float brightness;// 亮度 (0.0f - 1.0f)
+        float delta;     // 亮度变化方向 (+/-)
+        
+        Star(int x, int y) {
+            this.x = x;
+            this.y = y;
+            this.size = rand.nextInt(3) + 1;  // 1-3像素
+            this.brightness = rand.nextFloat();
+            this.delta = (rand.nextBoolean() ? 0.02f : -0.02f);
+        }
+        
+        void update() {
+            brightness += delta;
+            // 边界检测，反转方向
+            if (brightness <= 0.1f || brightness >= 1.0f) {
+                delta = -delta;
+            }
+        }
+        
+        void draw(Graphics g) {
+            int alpha = (int) (brightness * 255);
+            g.setColor(new Color(255, 255, 255, alpha));
+            g.fillOval(x, y, size, size);
+        }
+    }
     
     public GamePanel(PlaneDodgeGame game) {
         this.game = game;
@@ -149,6 +181,30 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         setFocusable(true);
         addKeyListener(this);
         setBackground(Color.BLACK);
+        initStars();
+        initStarTimer();
+    }
+    
+    // 初始化星星闪烁定时器（独立于游戏主循环）
+    private void initStarTimer() {
+        starTimer = new javax.swing.Timer(50, e -> {
+            // 更新所有星星的亮度
+            for (Star star : stars) {
+                star.update();
+            }
+            repaint();
+        });
+        starTimer.start();
+    }
+    
+    // 初始化星星背景
+    private void initStars() {
+        stars.clear();
+        for (int i = 0; i < 150; i++) {
+            int x = rand.nextInt(WIDTH);
+            int y = rand.nextInt(HEIGHT);
+            stars.add(new Star(x, y));
+        }
     }
     
     public static void setDifficulty(int diff) {
@@ -170,6 +226,10 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         bullets.clear();
         if (gameTimer != null) {
             gameTimer.stop();
+        }
+        // 确保星星定时器在运行
+        if (starTimer != null && !starTimer.isRunning()) {
+            starTimer.start();
         }
     }
     
@@ -257,8 +317,17 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
-        g.setColor(Color.BLACK);
+        
+        // 绘制渐变背景（深蓝到黑色）
+        GradientPaint gradient = new GradientPaint(0, 0, new Color(10, 10, 30), 
+                                                  0, HEIGHT, new Color(0, 0, 10));
+        ((Graphics2D)g).setPaint(gradient);
         g.fillRect(0, 0, WIDTH, HEIGHT);
+        
+        // 绘制星星背景
+        for (Star star : stars) {
+            star.draw(g);
+        }
         
         // 障碍物（红色方块）
         g.setColor(Color.RED);
@@ -272,7 +341,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             g.fillOval(b.x, b.y, BULLET_SIZE, BULLET_SIZE);
         }
         
-                // 飞机（绿色三角形）
+        // 飞机（绿色三角形）
         g.setColor(Color.GREEN);
         int[] xPoints = {
             playerX + PLAYER_SIZE/2,
