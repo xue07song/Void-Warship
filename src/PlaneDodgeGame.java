@@ -136,6 +136,9 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     private int score = 0;
     private boolean gameRunning = true;
     
+        private Set<Integer> pressedKeys = new HashSet<>();
+    private static final double DIAGONAL_FACTOR = 0.7071067811865475; // 1/√2，斜向速度归一化
+    
     private List<Rectangle> obstacles = new ArrayList<>();
     private List<Rectangle> bullets = new ArrayList<>();
     private Random rand = new Random();
@@ -292,30 +295,67 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         g.drawString("🎮 操作: [WASD/方向键]移动  [J/空格]射击", 20, 160);
     }
     
-        @Override
+                @Override
     public void keyPressed(KeyEvent e) {
         if (!gameRunning) return;
-        int step = 15;
-        if (e.getKeyCode() == KeyEvent.VK_A || e.getKeyCode() == KeyEvent.VK_LEFT) {
-            playerX = Math.max(0, playerX - step);
-        } else if (e.getKeyCode() == KeyEvent.VK_D || e.getKeyCode() == KeyEvent.VK_RIGHT) {
-            playerX = Math.min(WIDTH - PLAYER_SIZE, playerX + step);
-        } else if (e.getKeyCode() == KeyEvent.VK_W || e.getKeyCode() == KeyEvent.VK_UP) {
-            playerY = Math.max(0, playerY - step);
-        } else if (e.getKeyCode() == KeyEvent.VK_S || e.getKeyCode() == KeyEvent.VK_DOWN) {
-            playerY = Math.min(HEIGHT - PLAYER_SIZE, playerY + step);
-        } else if (e.getKeyCode() == KeyEvent.VK_J || e.getKeyCode() == KeyEvent.VK_SPACE) {
+        int code = e.getKeyCode();
+        // 射击逻辑保持不变
+        if (code == KeyEvent.VK_J || code == KeyEvent.VK_SPACE) {
             int bulletX = playerX + PLAYER_SIZE/2 - BULLET_SIZE/2;
             bullets.add(new Rectangle(bulletX, playerY - 10, BULLET_SIZE, BULLET_SIZE));
+            repaint();
+            return;
         }
-        repaint();
+        // 方向键加入集合
+        pressedKeys.add(code);
+        updateMovement();
     }
     
     @Override
-    public void keyReleased(KeyEvent e) {}
+    public void keyReleased(KeyEvent e) {
+        int code = e.getKeyCode();
+        // 方向键从集合移除
+        if (isDirectionKey(code)) {
+            pressedKeys.remove(code);
+            updateMovement();
+        }
+    }
     
     @Override
     public void keyTyped(KeyEvent e) {}
+    
+    private boolean isDirectionKey(int code) {
+        return code == KeyEvent.VK_W || code == KeyEvent.VK_UP ||
+               code == KeyEvent.VK_S || code == KeyEvent.VK_DOWN ||
+               code == KeyEvent.VK_A || code == KeyEvent.VK_LEFT ||
+               code == KeyEvent.VK_D || code == KeyEvent.VK_RIGHT;
+    }
+    
+    private void updateMovement() {
+        int step = 15;
+        boolean moveUp = pressedKeys.contains(KeyEvent.VK_W) || pressedKeys.contains(KeyEvent.VK_UP);
+        boolean moveDown = pressedKeys.contains(KeyEvent.VK_S) || pressedKeys.contains(KeyEvent.VK_DOWN);
+        boolean moveLeft = pressedKeys.contains(KeyEvent.VK_A) || pressedKeys.contains(KeyEvent.VK_LEFT);
+        boolean moveRight = pressedKeys.contains(KeyEvent.VK_D) || pressedKeys.contains(KeyEvent.VK_RIGHT);
+        
+        int dx = 0;
+        int dy = 0;
+        if (moveLeft) dx -= step;
+        if (moveRight) dx += step;
+        if (moveUp) dy -= step;
+        if (moveDown) dy += step;
+        
+        // 斜向移动时速度归一化
+        if (dx != 0 && dy != 0) {
+            dx = (int) Math.round(dx * DIAGONAL_FACTOR);
+            dy = (int) Math.round(dy * DIAGONAL_FACTOR);
+        }
+        
+        playerX = Math.max(0, Math.min(WIDTH - PLAYER_SIZE, playerX + dx));
+        playerY = Math.max(0, Math.min(HEIGHT - PLAYER_SIZE, playerY + dy));
+        
+        repaint();
+    }
     
     private int loadHighScore() {
         try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream("score.dat"))) {
