@@ -181,7 +181,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     
     // 射击冷却（毫秒），防止键盘重复触发导致子弹连射
         private long lastShotTime = 0;
-    private static final long SHOT_COOLDOWN_MS = 250;
+    private static final long SHOT_COOLDOWN_MS = 200;
     
     // ★ 新增：帧率计数器
     private long lastFpsTime = 0;
@@ -270,19 +270,19 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         }
     }
     
-                                public static void setDifficulty(int diff) {
+                                                                public static void setDifficulty(int diff) {
                                     switch(diff) {
-                                        case 0: // 简单：飞机慢、激光慢
-                                            speedMs = 800; obstacleStep = 25;
-                                            playerStep = 7; bulletBaseSpeed = 16f;
+                                        case 0: // 简单（加速版）：初始约等于旧版普通，动态上涨更快
+                                            speedMs = 450; obstacleStep = 38;
+                                            playerStep = 11; bulletBaseSpeed = 25f;
                                             break;
-                                        case 1: // 普通：飞机中等、激光中等
-                                            speedMs = 500; obstacleStep = 40;
-                                            playerStep = 12; bulletBaseSpeed = 28f;
+                                        case 1: // 普通（加速版）：初始约等于旧版困难，动态上涨更快
+                                            speedMs = 250; obstacleStep = 50;
+                                            playerStep = 16; bulletBaseSpeed = 40f;
                                             break;
-                                        case 2: // 困难：飞机快、激光快
-                                            speedMs = 300; obstacleStep = 55;
-                                            playerStep = 18; bulletBaseSpeed = 42f;
+                                        case 2: // 困难（加速版）：初始大幅提升，动态上涨极快
+                                            speedMs = 150; obstacleStep = 68;
+                                            playerStep = 24; bulletBaseSpeed = 58f;
                                             break;
                                         default: speedMs = 500; obstacleStep = 40;
                                             playerStep = 12; bulletBaseSpeed = 28f;
@@ -316,161 +316,156 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         return System.currentTimeMillis() - gameStartTime - totalPausedTime;
     }
     
-        // ★★★ 重新设计：平滑层次化障碍物生成概率 ★★★
+                // ★★★ 重新设计（加速版）：平滑层次化障碍物生成概率 ★★★
     private int getCurrentObstacleProb() {
-        // 基础概率：按难度设定（分母越大，生成概率越低）
+        // 基础概率：按难度设定（分母越小，生成概率越低）— 全部提升
         int baseProb;
         switch (difficultyLevel) {
-            case 0: baseProb = 28; break;  // 简单 1/28
-            case 1: baseProb = 22; break;  // 普通 1/22
-            case 2: baseProb = 16; break;  // 困难 1/16
+            case 0: baseProb = 22; break;  // 简单 1/22（原28）
+            case 1: baseProb = 16; break;  // 普通 1/16（原22）
+            case 2: baseProb = 12; break;  // 困难 1/12（原16）
             default: baseProb = 22;
         }
         
         long elapsedSec = getEffectiveElapsedMs() / 1000;
         
-        // ★★★ 层次化难度设计 ★★★
-        // 【阶段1 - 新手期】0~100分 / 0~30秒：几乎无变化，让玩家适应
-        // 【阶段2 - 成长期】100~300分 / 30~90秒：缓慢提升
-        // 【阶段3 - 挑战期】300~600分 / 90~180秒：中等提升
-        // 【阶段4 - 高手期】600分+ / 180秒+：深度提升，仍保留可玩性
+        // 【阶段1】0~60分 / 0~20秒：少量变化
+        // 【阶段2】60~200分 / 20~60秒：快速提升
+        // 【阶段3】200分+ / 60秒+：深度提升
         
         int scoreReduction = 0;
-        if (score > 100) {
-            scoreReduction += (score - 100) / 150;     // 阶段2：每150分-1
+        if (score > 60) {
+            scoreReduction += (score - 60) / 80;       // 每80分-1（原150）
         }
-        if (score > 300) {
-            scoreReduction += (score - 300) / 200;     // 阶段3：额外每200分-1
+        if (score > 200) {
+            scoreReduction += (score - 200) / 120;     // 额外每120分-1（原200）
         }
         
         int timeReduction = 0;
-        if (elapsedSec > 30) {
-            timeReduction += (int)(elapsedSec - 30) / 45;   // 阶段2：30秒后每45秒-1
+        if (elapsedSec > 20) {
+            timeReduction += (int)(elapsedSec - 20) / 25;   // 20秒后每25秒-1（原45）
         }
-        if (elapsedSec > 120) {
-            timeReduction += (int)(elapsedSec - 120) / 60;  // 阶段3：2分钟后额外每60秒-1
+        if (elapsedSec > 80) {
+            timeReduction += (int)(elapsedSec - 80) / 35;   // 80秒后额外每35秒-1（原60）
         }
         
         int totalReduction = Math.max(scoreReduction, timeReduction);
-        // 最低分母按难度区分：简单8 / 普通6 / 困难5，保留可玩性
-        int minProb = difficultyLevel == 0 ? 8 : (difficultyLevel == 1 ? 6 : 5);
+        // 最低分母大幅降低：简单5 / 普通4 / 困难3
+        int minProb = difficultyLevel == 0 ? 5 : (difficultyLevel == 1 ? 4 : 3);
         return Math.max(minProb, baseProb - totalReduction);
     }
     
-        // ★★★ 重新设计：平滑层次化速度增长 ★★★
+                // ★★★ 重新设计（加速版）：平滑层次化速度增长 ★★★
     private float getCurrentSpeedMultiplier() {
         long elapsedSec = getEffectiveElapsedMs() / 1000;
         float multiplier = 1.0f;
         
-        // 【阶段1 - 新手期】0~200分 / 0~60秒：速度不变（1.0倍）
-        // 【阶段2 - 成长期】200~500分 / 60~150秒：缓慢加速
-        // 【阶段3 - 挑战期】500分+ / 150秒+：进一步加速
+        // 【阶段1】0~100分 / 0~30秒：少量加速起步
+        // 【阶段2】100~300分 / 30~90秒：快速加速
+        // 【阶段3】300分+ / 90秒+：深度加速
         
-        // 基于分数的加速（更平缓）
-        if (score > 200) {
-            int scoreBonus = Math.min((score - 200) / 100, 5);   // 每100分一级，最多5级
-            multiplier += scoreBonus * 0.08f;                     // 每级+8%，最多+40%
+        // 基于分数的加速
+        if (score > 100) {
+            int scoreBonus = Math.min((score - 100) / 60, 8);    // 每60分一级，最多8级
+            multiplier += scoreBonus * 0.10f;                     // 每级+10%，最多+80%
         }
-        if (score > 500) {
-            int scoreBonus2 = Math.min((score - 500) / 150, 3);  // 每150分一级，最多3级
-            multiplier += scoreBonus2 * 0.06f;                    // 每级再+6%，最多再+18%
+        if (score > 300) {
+            int scoreBonus2 = Math.min((score - 300) / 100, 5);  // 每100分一级，最多5级
+            multiplier += scoreBonus2 * 0.08f;                    // 每级再+8%，最多再+40%
         }
         
-        // 基于时间的加速（与分数加速取较大值，避免叠加过于夸张）
+        // 基于时间的加速
         float timeMultiplier = 1.0f;
-        if (elapsedSec > 60) {
-            int timeBonus = Math.min((int)(elapsedSec - 60) / 30, 5);  // 每30秒一级，最多5级
-            timeMultiplier += timeBonus * 0.08f;
+        if (elapsedSec > 30) {
+            int timeBonus = Math.min((int)(elapsedSec - 30) / 20, 8);  // 每20秒一级，最多8级
+            timeMultiplier += timeBonus * 0.10f;
         }
-        if (elapsedSec > 150) {
-            int timeBonus2 = Math.min((int)(elapsedSec - 150) / 40, 3); // 每40秒一级，最多3级
-            timeMultiplier += timeBonus2 * 0.06f;
+        if (elapsedSec > 90) {
+            int timeBonus2 = Math.min((int)(elapsedSec - 90) / 30, 5); // 每30秒一级，最多5级
+            timeMultiplier += timeBonus2 * 0.08f;
         }
         
-        // 取较大值，上限1.7倍（不再到3倍那么夸张）
+        // 取较大值，上限2.2倍（原1.7）
         multiplier = Math.max(multiplier, timeMultiplier);
-        return Math.min(1.7f, multiplier);
+        return Math.min(2.2f, multiplier);
     }
     
-        // ★★ 重新设计：平滑层次化逻辑更新间隔（障碍物生成频率）
+                // ★★ 重新设计（加速版）：平滑层次化逻辑更新间隔（障碍物生成频率）
     private int getCurrentSpeedMs() {
         long elapsedSec = getEffectiveElapsedMs() / 1000;
         // 基础间隔（按难度原始值）
         int baseMs = speedMs;
         
-        // ★★★ 层次化缩减 ★★★
-        // 【阶段1】0~150分 / 0~45秒：间隔不变
-        // 【阶段2】150~400分 / 45~120秒：缓慢缩减
-        // 【阶段3】400分+ / 120秒+：进一步缩减
+        // 【阶段1】0~80分 / 0~25秒：间隔开始缩减
+        // 【阶段2】80~250分 / 25~70秒：快速缩减
+        // 【阶段3】250分+ / 70秒+：深度缩减
         
         int reduction = 0;
         
         // 基于分数的缩减
-        if (score > 150) {
-            int scoreRed1 = Math.min((score - 150) / 80, 5);      // 每80分一级，最多5级
-            reduction = Math.max(reduction, scoreRed1 * 30);      // 每级减30ms，最多150ms
+        if (score > 80) {
+            int scoreRed1 = Math.min((score - 80) / 50, 8);       // 每50分一级，最多8级（原80）
+            reduction = Math.max(reduction, scoreRed1 * 25);      // 每级减25ms（原30）
         }
-        if (score > 400) {
-            int scoreRed2 = Math.min((score - 400) / 120, 3);     // 每120分一级，最多3级
-            reduction = Math.max(reduction, reduction + scoreRed2 * 20); // 每级再减20ms
+        if (score > 250) {
+            int scoreRed2 = Math.min((score - 250) / 80, 5);      // 每80分一级，最多5级（原120）
+            reduction = Math.max(reduction, reduction + scoreRed2 * 15); // 每级再减15ms
         }
         
         // 基于时间的缩减
-        if (elapsedSec > 45) {
-            int timeRed1 = Math.min((int)(elapsedSec - 45) / 25, 5);  // 每25秒一级，最多5级
-            reduction = Math.max(reduction, timeRed1 * 30);
+        if (elapsedSec > 25) {
+            int timeRed1 = Math.min((int)(elapsedSec - 25) / 15, 8); // 每15秒一级，最多8级（原25）
+            reduction = Math.max(reduction, timeRed1 * 25);
         }
-        if (elapsedSec > 120) {
-            int timeRed2 = Math.min((int)(elapsedSec - 120) / 35, 3); // 每35秒一级，最多3级
-            reduction = Math.max(reduction, reduction + timeRed2 * 20);
+        if (elapsedSec > 70) {
+            int timeRed2 = Math.min((int)(elapsedSec - 70) / 25, 5); // 每25秒一级，最多5级（原35）
+            reduction = Math.max(reduction, reduction + timeRed2 * 15);
         }
         
-        // 最低间隔：简单250ms / 普通200ms / 困难160ms（保留喘息空间）
-        int minMs = difficultyLevel == 0 ? 250 : (difficultyLevel == 1 ? 200 : 160);
+        // 最低间隔大幅降低：简单150ms / 普通120ms / 困难90ms
+        int minMs = difficultyLevel == 0 ? 150 : (difficultyLevel == 1 ? 120 : 90);
         return Math.max(minMs, baseMs - reduction);
     }
     
-        // ★★ 重新设计：保守层次化额外障碍物生成
+                // ★★ 重新设计（加速版）：层次化额外障碍物生成
     private boolean shouldSpawnExtra() {
         long elapsedSec = getEffectiveElapsedMs() / 1000;
         
-        // ★★★ 层次化额外生成 ★★★
-        // 【阶段1】0~200分 / 0~60秒：不生成额外障碍物（给玩家适应时间）
-        // 【阶段2】200~400分 / 60~120秒：15%概率生成1个额外
-        // 【阶段3】400~600分 / 120~200秒：25%概率生成1个额外
-        // 【阶段4】600分+ / 200秒+：35%概率生成1个额外，低概率(10%)生成2个
+        // 【阶段1】0~100分 / 0~30秒：少量概率生成额外障碍物
+        // 【阶段2】100~300分 / 30~80秒：中等概率
+        // 【阶段3】300分+ / 80秒+：高概率
         
-        int scoreLevel = score / 200;          // 每200分一级
-        int timeLevel = (int)(elapsedSec / 60); // 每60秒一级
+        int scoreLevel = score / 100;          // 每100分一级（原200）
+        int timeLevel = (int)(elapsedSec / 30); // 每30秒一级（原60）
         int extraLevel = Math.max(scoreLevel, timeLevel);
         
-        // 第0级（前200分/前60秒）不生成额外障碍物
-        if (extraLevel == 0) return false;
+        // 第0级（前100分/前30秒）少量概率
+        if (extraLevel == 0) return rand.nextFloat() < 0.08f;
         
         if (extraLevel == 1) {
-            // 阶段2：15%概率生成1个额外
-            return rand.nextFloat() < 0.15f;
-        } else if (extraLevel == 2) {
-            // 阶段3：25%概率生成1个额外
+            // 阶段2：25%概率（原15%）
             return rand.nextFloat() < 0.25f;
+        } else if (extraLevel == 2) {
+            // 阶段3：40%概率（原25%）
+            return rand.nextFloat() < 0.40f;
         } else {
-            // 阶段4+：35%概率生成1个额外，其中有10%概率生成2个（条件概率）
-            if (rand.nextFloat() < 0.35f) {
-                return true;
-            }
-            return false;
+            // 阶段4+：55%概率（原35%）
+            return rand.nextFloat() < 0.55f;
         }
     }
     
-    // ★★ 新增：获取额外障碍物生成数量（与 shouldSpawnExtra 配合使用）
+    // ★★ 获取额外障碍物生成数量（加速版）
     private int getExtraSpawnCount() {
         long elapsedSec = getEffectiveElapsedMs() / 1000;
-        int scoreLevel = score / 200;
-        int timeLevel = (int)(elapsedSec / 60);
+        int scoreLevel = score / 100;
+        int timeLevel = (int)(elapsedSec / 30);
         int extraLevel = Math.max(scoreLevel, timeLevel);
         
-        // 只有阶段4+才有可能生成2个，概率约10%
-        if (extraLevel >= 3 && rand.nextFloat() < 0.10f) {
+        // 阶段2+即有概率生成2个，阶段4+更高概率
+        if (extraLevel >= 1 && rand.nextFloat() < 0.15f) {
+            return 2;
+        }
+        if (extraLevel >= 3 && rand.nextFloat() < 0.20f) {
             return 2;
         }
         return 1;
@@ -648,17 +643,14 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
                                     }
                                 }
         
-                                // ★★★ 动态调整障碍物移动速度（每帧移动量）— 使用动态speedMs
+                                                                // ★★★ 动态调整障碍物移动速度（每帧移动量）— 使用动态speedMs
                                 float speedMultiplier = getCurrentSpeedMultiplier();
                                 int currentSpeedMs = getCurrentSpeedMs();
                                 float pixelsPerMs = (float)obstacleStep / (float)currentSpeedMs;
                                 obstacleMovePerFrame = pixelsPerMs * FRAME_INTERVAL_MS * speedMultiplier;
                                 // ★ 子弹速度也随之动态提升（使用按难度设置的 bulletBaseSpeed）
-                                //   确保激光速度始终大于飞行器速度：
-                                //   飞行器步长: 简单=7, 普通=12, 困难=18
-                                //   激光每帧:  简单≈2.6, 普通≈4.7, 困难≈7.0 (乘2.0后)
-                                //     乘以 speedMultiplier 让激光也随游戏进程加速
-                                bulletMovePerFrame = (bulletBaseSpeed / Math.max(currentSpeedMs, 100)) * FRAME_INTERVAL_MS * 2.0f * speedMultiplier;
+                                //   激光乘以3.0倍系数（原2.0），确保激光速度远大于障碍物速度
+                                bulletMovePerFrame = (bulletBaseSpeed / Math.max(currentSpeedMs, 80)) * FRAME_INTERVAL_MS * 3.0f * speedMultiplier;
         
                 // 碰撞检测 - 无敌期间不受伤害
         long now = System.currentTimeMillis();
