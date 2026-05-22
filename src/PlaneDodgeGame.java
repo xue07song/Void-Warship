@@ -191,7 +191,15 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     // 无敌时间（被击中后短暂无敌，防止一次性扣完所有生命）
     private long invincibleUntil = 0;
     private static final long INVINCIBLE_DURATION = 1200;
-    private static final Color INVINCIBLE_COLOR = new Color(0, 255, 0, 80); // ★ 缓存无敌闪烁颜色
+        private static final Color INVINCIBLE_COLOR = new Color(0, 255, 0, 80); // ★ 缓存无敌闪烁颜色
+    
+    // ★ 暂停功能相关
+    private boolean paused = false;              // 是否处于暂停状态
+    private long pauseStartTime = 0;             // 暂停开始时间
+    private long totalPausedTime = 0;            // 累计暂停时间（毫秒）
+    private Font pauseFont = new Font("微软雅黑", Font.BOLD, 48);
+    private Font pauseHintFont = new Font("微软雅黑", Font.PLAIN, 24);
+    private Color pauseOverlay = new Color(0, 0, 0, 180);  // 半透明黑色遮罩
     
     // 星星类 - 用于星光闪烁特效
     private class Star {
@@ -281,7 +289,12 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         bulletMovePerFrame = (20f / Math.max(currentSpeedMs, 100)) * FRAME_INTERVAL_MS * 1.5f;
     }
     
-        // ★★★ 大幅增强：根据得分和经过时间计算当前障碍物生成概率分母
+        // ★ 获取有效的经过时间（扣除暂停时间）
+    private long getEffectiveElapsedMs() {
+        return System.currentTimeMillis() - gameStartTime - totalPausedTime;
+    }
+    
+    // ★★★ 大幅增强：根据得分和经过时间计算当前障碍物生成概率分母
     private int getCurrentObstacleProb() {
         // 基础概率：按难度设定
         int baseProb;
@@ -292,7 +305,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             default: baseProb = 20;
         }
         
-        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+                long elapsedSec = getEffectiveElapsedMs() / 1000;
         
         // ★★★ 大幅增强动态障碍物密度 ★★★
         // 每50分概率分母-5（原为每100分-2）
@@ -307,7 +320,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     
     // ★★★ 大幅增强：根据得分和经过时间计算当前障碍物移动速度倍率
     private float getCurrentSpeedMultiplier() {
-        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+                long elapsedSec = getEffectiveElapsedMs() / 1000;
         // 每60分提升 20% 速度（原为每200分8%）
         int scoreBonus = score / 60;
         // 每12秒提升 20%（原为每45秒8%）
@@ -319,7 +332,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     
     // ★★ 新增：根据得分和经过时间计算当前逻辑更新间隔（障碍物生成频率）
     private int getCurrentSpeedMs() {
-        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+                long elapsedSec = getEffectiveElapsedMs() / 1000;
         // 基础间隔（按难度原始值）
         int baseMs = speedMs;
         // 每20秒 speedMs 缩减 80ms（最低不低于120ms）
@@ -332,7 +345,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     
     // ★★ 新增：是否应该生成额外的障碍物（实现多波生成）
     private boolean shouldSpawnExtra() {
-        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+                long elapsedSec = getEffectiveElapsedMs() / 1000;
         int scoreThreshold = score / 60; // 每60分增加一级
         int timeThreshold = (int)(elapsedSec / 15); // 每15秒增加一级
         int extraLevel = Math.max(scoreThreshold, timeThreshold);
@@ -361,6 +374,10 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         lastFpsTime = 0;       // ★ 重置FPS计数器
         frameCount = 0;
         gameStartTime = System.currentTimeMillis(); // ★ 记录游戏开始时间
+        // ★ 暂停状态重置
+        paused = false;
+        totalPausedTime = 0;
+        pauseStartTime = 0;
         loadCachedHighScore();
     }
     
@@ -371,11 +388,36 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         gameTimer.start();
     }
     
-                @Override
-                public void actionPerformed(ActionEvent e) {
+                                        // ★★★ 新增：暂停/恢复切换方法
+        private void togglePause() {
+            if (paused) {
+                                // ★ 恢复游戏：累加暂停时间
+                                totalPausedTime += System.currentTimeMillis() - pauseStartTime;
+                                paused = false;
+            } else {
+                                // ★ 暂停游戏：记录暂停开始时间
+                                pauseStartTime = System.currentTimeMillis();
+                                // ★ 暂停时清除所有按键状态，防止恢复后出现"幽灵按键"
+                                pressedKeys.clear();
+                                paused = true;
+            }
+        }
+    
+                                @Override
+                                public void actionPerformed(ActionEvent e) {
                     if (!gameRunning) return;
         
                     long now = System.currentTimeMillis();
+        
+                    // ★ 如果处于暂停状态，只绘制画面（但不更新任何游戏逻辑）
+                    if (paused) {
+                        // 暂停期间星星继续闪烁，让画面有生机
+                        for (Star star : stars) {
+                            star.update();
+                        }
+                        repaint();
+                        return;
+                    }
         
                     // ★ FPS计数
                     frameCount++;
@@ -576,9 +618,9 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         g.drawString("❤️ 生命: " + lives, 20, 40);
         g.drawString("⭐ 得分: " + score, 20, 80);
         g.drawString("🏆 最高分: " + cachedHighScore, 20, 120);
-        g.drawString("🎮 操作: [WASD/方向键]移动  [J/空格]射击", 20, 160);
-        // ★ 显示当前难度等级（让玩家感知动态难度）
-        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+        g.drawString("🎮 操作: [WASD/方向键]移动  [J/空格]射击  [P]暂停", 20, 160);
+                // ★ 显示当前难度等级（让玩家感知动态难度）
+        long elapsedSec = getEffectiveElapsedMs() / 1000;
         int diffLevel = Math.min(10, Math.max(score / 80, (int)(elapsedSec / 15)));
         g.setColor(new Color(255, 200, 0));
         String diffStars = "";
@@ -588,18 +630,84 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         // ★ 显示障碍物数量（让玩家感知压力）
         g.setColor(new Color(255, 255, 255, 150));
         g.drawString("障碍物: " + obstacles.size(), WIDTH - 200, 120);
-        // ★ FPS显示（只显示在右上角，方便调试）
+                // ★ FPS显示（只显示在右上角，方便调试）
         if (showFps) {
             g.setColor(new Color(255, 255, 255, 100));
             g.drawString("FPS: " + currentFps, WIDTH - 120, 30);
         }
+        
+        // ★★★ 暂停状态绘制半透明遮罩和暂停提示
+        if (paused) {
+            drawPauseOverlay(g);
+        }
+    }
+    
+    // ★★★ 新增：绘制暂停遮罩
+    private void drawPauseOverlay(Graphics g) {
+        Graphics2D g2d = (Graphics2D) g;
+        // 保存原始合成规则
+        Composite originalComposite = g2d.getComposite();
+        
+        // 1. 半透明黑色遮罩覆盖整个画面
+        g2d.setComposite(AlphaComposite.SrcOver.derive(0.65f));
+        g2d.setColor(Color.BLACK);
+        g2d.fillRect(0, 0, WIDTH, HEIGHT);
+        
+        // 2. 恢复合成模式绘制文字
+        g2d.setComposite(originalComposite);
+        
+        // 3. 绘制暂停标题（居中大号、金色、闪烁效果）
+        g2d.setFont(pauseFont);
+        g2d.setColor(new Color(255, 215, 0));  // 金色
+        String pauseTitle = "⏸ 游戏暂停";
+        FontMetrics fm = g2d.getFontMetrics();
+        int titleX = (WIDTH - fm.stringWidth(pauseTitle)) / 2;
+        int titleY = HEIGHT / 2 - 60;
+        g2d.drawString(pauseTitle, titleX, titleY);
+        
+        // 4. 绘制提示文字（白色，稍小字体）
+        g2d.setFont(pauseHintFont);
+        g2d.setColor(Color.WHITE);
+        String hintText = "按  P  键继续游戏";
+        fm = g2d.getFontMetrics();
+        int hintX = (WIDTH - fm.stringWidth(hintText)) / 2;
+        g2d.drawString(hintText, hintX, titleY + 50);
+        
+        // 5. 绘制当前游戏状态信息
+        g2d.setFont(uiFont);
+        g2d.setColor(new Color(200, 200, 255));
+        String info1 = "❤️ 生命: " + lives + "    ⭐ 得分: " + score;
+        String info2 = "🚧 障碍物数量: " + obstacles.size() + "    🏆 最高分: " + cachedHighScore;
+        fm = g2d.getFontMetrics();
+        int info1X = (WIDTH - fm.stringWidth(info1)) / 2;
+        int info2X = (WIDTH - fm.stringWidth(info2)) / 2;
+        g2d.drawString(info1, info1X, titleY + 100);
+        g2d.drawString(info2, info2X, titleY + 135);
+        
+        // 6. 底部提示
+        g2d.setFont(new Font("微软雅黑", Font.PLAIN, 16));
+        g2d.setColor(new Color(255, 255, 255, 120));
+        String footText = "[ 按 P 键暂停或继续  ]";
+        fm = g2d.getFontMetrics();
+        int footX = (WIDTH - fm.stringWidth(footText)) / 2;
+        g2d.drawString(footText, footX, HEIGHT - 30);
     }
     
                                     
-        @Override
+                @Override
     public void keyPressed(KeyEvent e) {
         if (!gameRunning) return;
         int code = e.getKeyCode();
+        
+        // ★★★ 暂停切换：P 键（无论是否暂停状态都响应）
+        if (code == KeyEvent.VK_P) {
+            togglePause();
+            return;
+        }
+        
+        // ★ 暂停期间所有其他按键无效
+        if (paused) return;
+        
         // 射击（带冷却控制，防止键盘重复触发生成大量子弹）
         if (code == KeyEvent.VK_J || code == KeyEvent.VK_SPACE) {
             long now = System.currentTimeMillis();
@@ -615,10 +723,11 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         }
     }
     
-    @Override
+        @Override
     public void keyReleased(KeyEvent e) {
         int code = e.getKeyCode();
         // 方向键清除位（BitSet使用clear方法）
+        // ★ 暂停时也允许清除方向键，确保恢复后状态干净
         if (isDirectionKey(code)) {
             pressedKeys.clear(code);
         }
