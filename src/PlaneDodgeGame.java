@@ -11,7 +11,7 @@ public class PlaneDodgeGame extends JFrame {
     private CardLayout cardLayout;
     private JPanel mainPanel;
     private MenuPanel menuPanel;
-    private GamePanel gamePanel;
+    GamePanel gamePanel;
 
     public PlaneDodgeGame() {
         setTitle("飞机躲避障碍物");
@@ -73,13 +73,14 @@ class MenuPanel extends JPanel {
         difficultyCombo = new JComboBox<>(difficulties);
         difficultyCombo.setFont(new Font("微软雅黑", Font.PLAIN, 18));
         
-        JButton startBtn = new JButton("开始游戏");
+                JButton startBtn = new JButton("开始游戏");
         startBtn.setFont(new Font("微软雅黑", Font.BOLD, 24));
         startBtn.setBackground(new Color(0, 150, 0));
         startBtn.setForeground(Color.WHITE);
         startBtn.addActionListener(e -> {
             int diff = difficultyCombo.getSelectedIndex();
             GamePanel.setDifficulty(diff);
+            game.gamePanel.setDifficultyLevel(diff); // ★ 记录难度等级
             game.showGame();
         });
         
@@ -179,9 +180,13 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     private int currentFps = 0;
     private boolean showFps = true;  // 可改为 false 隐藏
     
-    // ★ 新增：障碍物/子弹的浮点位置累加器（实现亚像素级平滑移动）
+        // ★ 新增：障碍物/子弹的浮点位置累加器（实现亚像素级平滑移动）
     private float obstacleAccumY = 0f;
     private float bulletAccumY = 0f;
+    
+    // ★ 障碍物随时间增多：记录游戏开始时间，用于动态难度
+    private long gameStartTime = 0;
+    private int difficultyLevel = 0; // 0=简单, 1=普通, 2=困难
     
     // 无敌时间（被击中后短暂无敌，防止一次性扣完所有生命）
     private long invincibleUntil = 0;
@@ -248,7 +253,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         }
     }
     
-                public static void setDifficulty(int diff) {
+                                public static void setDifficulty(int diff) {
         switch(diff) {
             case 0: speedMs = 800; obstacleStep = 25; break; // 简单：生成慢，移动慢
             case 1: speedMs = 500; obstacleStep = 40; break; // 普通：适中
@@ -258,18 +263,86 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         // ★ 重置实例的每帧移动量（由 startGame 重新计算）
     }
     
-    // ★ 新增：根据当前 FPS 和 obstacleStep 计算每帧移动量
-    private void calculatePerFrameMovement() {
+    // ★ 新增：记录当前难度等级，用于动态难度计算
+    public void setDifficultyLevel(int diff) {
+        this.difficultyLevel = diff;
+    }
+    
+        // ★ 新增：根据当前 FPS 和 obstacleStep 计算每帧移动量
+        private void calculatePerFrameMovement() {
         // obstacleStep 是每次逻辑更新的移动距离，现在要分摊到每帧
         // 假设障碍物每 speedMs 毫秒需要移动 obstacleStep 像素
         // 那么每毫秒移动 obstacleStep / speedMs 像素
         // 每帧移动 (obstacleStep / speedMs) * FRAME_INTERVAL_MS 像素
         float pixelsPerMs = (float)obstacleStep / (float)speedMs;
         obstacleMovePerFrame = pixelsPerMs * FRAME_INTERVAL_MS;
-        bulletMovePerFrame = (20f / speedMs) * FRAME_INTERVAL_MS; // 子弹原步长20
+        // 子弹速度也随动态间隔变化（更快刷新间隔 = 每帧移动更多）
+        int currentSpeedMs = getCurrentSpeedMs();
+        bulletMovePerFrame = (20f / Math.max(currentSpeedMs, 100)) * FRAME_INTERVAL_MS * 1.5f;
     }
     
-                                public void resetGame() {
+        // ★★★ 大幅增强：根据得分和经过时间计算当前障碍物生成概率分母
+    private int getCurrentObstacleProb() {
+        // 基础概率：按难度设定
+        int baseProb;
+        switch (difficultyLevel) {
+            case 0: baseProb = 25; break;  // 简单
+            case 1: baseProb = 20; break;  // 普通
+            case 2: baseProb = 12; break;  // 困难
+            default: baseProb = 20;
+        }
+        
+        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+        
+        // ★★★ 大幅增强动态障碍物密度 ★★★
+        // 每50分概率分母-5（原为每100分-2）
+        int scoreReduction = (score / 50) * 5;
+        // 每8秒概率分母-2（原为每30秒-1）
+        int timeReduction = (int)(elapsedSec / 8) * 2;
+        // 结合两种方案，取较大的降低量
+        int totalReduction = Math.max(scoreReduction, timeReduction);
+        // 最低不低于3（原为6），让后期障碍物非常密集
+        return Math.max(3, baseProb - totalReduction);
+    }
+    
+    // ★★★ 大幅增强：根据得分和经过时间计算当前障碍物移动速度倍率
+    private float getCurrentSpeedMultiplier() {
+        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+        // 每60分提升 20% 速度（原为每200分8%）
+        int scoreBonus = score / 60;
+        // 每12秒提升 20%（原为每45秒8%）
+        int timeBonus = (int)(elapsedSec / 12);
+        int totalBonus = Math.max(scoreBonus, timeBonus);
+        // 上限：速度不超过原始的 3.0 倍（原为1.4倍）
+        return 1.0f + Math.min(totalBonus, 10) * 0.20f;
+    }
+    
+    // ★★ 新增：根据得分和经过时间计算当前逻辑更新间隔（障碍物生成频率）
+    private int getCurrentSpeedMs() {
+        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+        // 基础间隔（按难度原始值）
+        int baseMs = speedMs;
+        // 每20秒 speedMs 缩减 80ms（最低不低于120ms）
+        int timeReduction = (int)(elapsedSec / 20) * 80;
+        // 每100分 speedMs 缩减 80ms
+        int scoreReduction = (score / 100) * 80;
+        int totalReduction = Math.max(timeReduction, scoreReduction);
+        return Math.max(120, baseMs - totalReduction);
+    }
+    
+    // ★★ 新增：是否应该生成额外的障碍物（实现多波生成）
+    private boolean shouldSpawnExtra() {
+        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+        int scoreThreshold = score / 60; // 每60分增加一级
+        int timeThreshold = (int)(elapsedSec / 15); // 每15秒增加一级
+        int extraLevel = Math.max(scoreThreshold, timeThreshold);
+        // 每1级有约30%概率额外生成一个障碍物，最多90%
+        if (extraLevel <= 0) return false;
+        float chance = Math.min(0.90f, extraLevel * 0.30f);
+        return rand.nextFloat() < chance;
+    }
+    
+                                                                public void resetGame() {
         gameRunning = true;
         lives = 3;
         score = 0;
@@ -287,6 +360,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         bulletAccumY = 0f;
         lastFpsTime = 0;       // ★ 重置FPS计数器
         frameCount = 0;
+        gameStartTime = System.currentTimeMillis(); // ★ 记录游戏开始时间
         loadCachedHighScore();
     }
     
@@ -319,9 +393,9 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         moveObstaclesSmoothly();
         moveBulletsSmoothly();
         
-        // ★ 按间隔执行游戏逻辑更新（生成障碍物、碰撞检测等）
-        //    但碰撞检测现在使用更精确的浮点位置
-        if (now - lastLogicUpdate >= speedMs) {
+                // ★ 使用动态间隔执行游戏逻辑更新（生成障碍物、碰撞检测等）
+        int currentSpeedMs = getCurrentSpeedMs();
+        if (now - lastLogicUpdate >= currentSpeedMs) {
             lastLogicUpdate = now;
             updateGameLogic();
         }
@@ -335,23 +409,19 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     }
     
         // ★ 新增：每帧平滑移动障碍物（使用浮点累加器，实现亚像素级平滑移动）
-    private void moveObstaclesSmoothly() {
-        if (obstacles.isEmpty()) return;
-        obstacleAccumY += obstacleMovePerFrame;
-        int intStep = (int) obstacleAccumY;
-        if (intStep <= 0) return;  // 累积不够1像素就不动，保持平滑
-        obstacleAccumY -= intStep;
+        // 注意：分数累加已在 updateGameLogic 中处理，这里只移动障碍物
+        private void moveObstaclesSmoothly() {
+            if (obstacles.isEmpty()) return;
+            obstacleAccumY += obstacleMovePerFrame;
+            int intStep = (int) obstacleAccumY;
+            if (intStep <= 0) return;  // 累积不够1像素就不动，保持平滑
+            obstacleAccumY -= intStep;
         
-        Iterator<Rectangle> it = obstacles.iterator();
-        while (it.hasNext()) {
-            Rectangle ob = it.next();
-            ob.y += intStep;
-            if (ob.y >= HEIGHT) {
-                it.remove();
-                score += 10;
+            for (Rectangle ob : obstacles) {
+                ob.y += intStep;
             }
+            // 障碍物移出屏幕的移除和加分统一在 updateGameLogic 中处理
         }
-    }
     
     // ★ 新增：每帧平滑移动子弹（使用浮点累加器）
     private void moveBulletsSmoothly() {
@@ -389,12 +459,40 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             }
         }
         
-        // 生成新障碍物
-        int prob = (speedMs <= 400) ? 12 : 20;
-        if (rand.nextInt(prob) == 0) {
-            int x = rand.nextInt(WIDTH - OBSTACLE_SIZE);
-            obstacles.add(new Rectangle(x, 0, OBSTACLE_SIZE, OBSTACLE_SIZE));
-        }
+                // ★ 移除移出屏幕的障碍物并加分（统一在逻辑更新中处理）
+                Iterator<Rectangle> itRemove = obstacles.iterator();
+                while (itRemove.hasNext()) {
+                    Rectangle ob = itRemove.next();
+                    if (ob.y >= HEIGHT) {
+                        itRemove.remove();
+                        score += 10;
+                    }
+                }
+        
+                                // ★★★ 生成新障碍物 — 动态概率，大幅增强
+                int prob = getCurrentObstacleProb();
+                // ★ 主障碍物生成（每次逻辑更新至少生成1个的概率大幅提升）
+                if (rand.nextInt(prob) == 0) {
+                    int x = rand.nextInt(WIDTH - OBSTACLE_SIZE);
+                    obstacles.add(new Rectangle(x, 0, OBSTACLE_SIZE, OBSTACLE_SIZE));
+                }
+                // ★★ 额外障碍物生成（多波生成，得分/时间越高越容易生成多个）
+                if (shouldSpawnExtra()) {
+                    // 有时生成第2个，有时生成第2+3个
+                    int extraCount = rand.nextBoolean() ? 1 : 2;
+                    for (int e = 0; e < extraCount; e++) {
+                        int x = rand.nextInt(WIDTH - OBSTACLE_SIZE);
+                        obstacles.add(new Rectangle(x, 0, OBSTACLE_SIZE, OBSTACLE_SIZE));
+                    }
+                }
+        
+                                // ★★★ 动态调整障碍物移动速度（每帧移动量）— 使用动态speedMs
+                float speedMultiplier = getCurrentSpeedMultiplier();
+                int currentSpeedMs = getCurrentSpeedMs();
+                float pixelsPerMs = (float)obstacleStep / (float)currentSpeedMs;
+                obstacleMovePerFrame = pixelsPerMs * FRAME_INTERVAL_MS * speedMultiplier;
+                // ★ 子弹速度也随之动态提升
+                bulletMovePerFrame = (20f / Math.max(currentSpeedMs, 100)) * FRAME_INTERVAL_MS * 1.5f;
         
                 // 碰撞检测 - 无敌期间不受伤害
         long now = System.currentTimeMillis();
@@ -472,13 +570,24 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         };
         g.fillPolygon(xPoints, yPoints, 3);
       
-        // UI文字 - 使用缓存的最高分和字体
+                // UI文字 - 使用缓存的最高分和字体
         g.setColor(Color.WHITE);
         g.setFont(uiFont);
         g.drawString("❤️ 生命: " + lives, 20, 40);
         g.drawString("⭐ 得分: " + score, 20, 80);
         g.drawString("🏆 最高分: " + cachedHighScore, 20, 120);
         g.drawString("🎮 操作: [WASD/方向键]移动  [J/空格]射击", 20, 160);
+        // ★ 显示当前难度等级（让玩家感知动态难度）
+        long elapsedSec = (System.currentTimeMillis() - gameStartTime) / 1000;
+        int diffLevel = Math.min(10, Math.max(score / 80, (int)(elapsedSec / 15)));
+        g.setColor(new Color(255, 200, 0));
+        String diffStars = "";
+        for (int i = 0; i < diffLevel && i < 5; i++) diffStars += "★";
+        if (diffLevel > 5) diffStars += "+";
+        g.drawString("🔥 难度: " + (diffLevel == 0 ? "★" : diffStars), WIDTH - 200, 80);
+        // ★ 显示障碍物数量（让玩家感知压力）
+        g.setColor(new Color(255, 255, 255, 150));
+        g.drawString("障碍物: " + obstacles.size(), WIDTH - 200, 120);
         // ★ FPS显示（只显示在右上角，方便调试）
         if (showFps) {
             g.setColor(new Color(255, 255, 255, 100));
