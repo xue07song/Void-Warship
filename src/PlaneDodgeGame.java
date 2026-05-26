@@ -548,8 +548,9 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         
         // ★ 核心优化：障碍物和子弹改为每帧增量移动（浮点累加），实现平滑动画
         //   障碍物生成、碰撞检测等逻辑依然按 speedMs 间隔执行
-        moveObstaclesSmoothly();
-        moveBulletsSmoothly();
+                moveObstaclesSmoothly();
+        // ★ 修复：改调用每帧碰撞检测版本，确保子弹不会穿过障碍物
+        moveBulletsAndCheckCollision();
         
                 // ★ 使用动态间隔执行游戏逻辑更新（生成障碍物、碰撞检测等）
         int currentSpeedMs = getCurrentSpeedMs();
@@ -581,107 +582,106 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             // 障碍物移出屏幕的移除和加分统一在 updateGameLogic 中处理
         }
     
-    // ★ 新增：每帧平滑移动子弹（使用浮点累加器）
-    private void moveBulletsSmoothly() {
+        // ★ 修复：每帧移动子弹 + 每帧碰撞检测，确保子弹不会穿过障碍物
+    private void moveBulletsAndCheckCollision() {
         if (bullets.isEmpty()) return;
         bulletAccumY += bulletMovePerFrame;
         int intStep = (int) bulletAccumY;
         if (intStep <= 0) return;
         bulletAccumY -= intStep;
         
-        Iterator<Rectangle> it = bullets.iterator();
-        while (it.hasNext()) {
-            Rectangle b = it.next();
+        Iterator<Rectangle> bit = bullets.iterator();
+        while (bit.hasNext()) {
+            Rectangle b = bit.next();
             b.y -= intStep;
+            
+            // ★ 每帧都做碰撞检测：子弹移动后立即检查是否碰到障碍物
+            Iterator<Rectangle> oit = obstacles.iterator();
+            boolean hit = false;
+            while (oit.hasNext()) {
+                Rectangle ob = oit.next();
+                if (b.intersects(ob)) {
+                    oit.remove();  // 障碍物被摧毁
+                    bit.remove();  // 子弹消失
+                    score += 20;
+                    hit = true;
+                    break;
+                }
+            }
+            if (hit) continue;
+
+            // 子弹飞出屏幕后移除
             if (b.y + BULLET_SIZE < 0) {
-                it.remove();
+                bit.remove();
             }
         }
     }
     
         private void updateGameLogic() {
-        // ★ 障碍物和子弹移动已改为每帧平滑移动（moveObstaclesSmoothly/moveBulletsSmoothly）
-        // 这里只负责：生成障碍物、子弹碰撞障碍物、玩家碰撞检测
+            // 【注意】障碍物移动 和 子弹移动+碰撞 已由每帧的 moveObstaclesSmoothly / moveBulletsAndCheckCollision 处理
+            // 这里只处理：障碍物移出屏幕加分、生成新障碍物、玩家碰撞检测
         
-        // 子弹碰撞障碍物
-        for (int i = bullets.size() - 1; i >= 0; i--) {
-            Rectangle bullet = bullets.get(i);
-            for (int j = obstacles.size() - 1; j >= 0; j--) {
-                Rectangle ob = obstacles.get(j);
-                if (bullet.intersects(ob)) {
-                    obstacles.remove(j);
-                    bullets.remove(i);
-                    score += 20;
-                    break;
+            // ★ 移除移出屏幕的障碍物并加分
+            Iterator<Rectangle> itRemove = obstacles.iterator();
+            while (itRemove.hasNext()) {
+                Rectangle ob = itRemove.next();
+                if (ob.y >= HEIGHT) {
+                    itRemove.remove();
+                    score += 10;
                 }
             }
-        }
         
-                // ★ 移除移出屏幕的障碍物并加分（统一在逻辑更新中处理）
-                Iterator<Rectangle> itRemove = obstacles.iterator();
-                while (itRemove.hasNext()) {
-                    Rectangle ob = itRemove.next();
-                    if (ob.y >= HEIGHT) {
-                        itRemove.remove();
-                        score += 10;
+            // ★★★ 层次化障碍物生成 ★★★
+            int prob = getCurrentObstacleProb();
+            if (rand.nextInt(prob) == 0) {
+                int x = rand.nextInt(WIDTH - OBSTACLE_SIZE);
+                obstacles.add(new Rectangle(x, 0, OBSTACLE_SIZE, OBSTACLE_SIZE));
+            }
+            if (shouldSpawnExtra()) {
+                int extraCount = getExtraSpawnCount();
+                for (int e = 0; e < extraCount; e++) {
+                    int x = rand.nextInt(WIDTH - OBSTACLE_SIZE);
+                    obstacles.add(new Rectangle(x, 0, OBSTACLE_SIZE, OBSTACLE_SIZE));
+                }
+            }
+        
+            // ★★★ 动态调整障碍物和子弹的每帧移动速度
+            float speedMultiplier = getCurrentSpeedMultiplier();
+            int currentSpeedMs = getCurrentSpeedMs();
+            float pixelsPerMs = (float)obstacleStep / (float)currentSpeedMs;
+            obstacleMovePerFrame = pixelsPerMs * FRAME_INTERVAL_MS * speedMultiplier;
+            bulletMovePerFrame = (bulletBaseSpeed / Math.max(currentSpeedMs, 80)) * FRAME_INTERVAL_MS * 3.0f * speedMultiplier;
+        
+            // 玩家碰撞检测 - 无敌期间不受伤害
+            long now = System.currentTimeMillis();
+            if (now > invincibleUntil) {
+                playerRect.setBounds(playerX, playerY, PLAYER_SIZE, PLAYER_SIZE);
+                Iterator<Rectangle> itColl = obstacles.iterator();
+                boolean damaged = false;
+                while (itColl.hasNext()) {
+                    Rectangle ob = itColl.next();
+                    if (playerRect.intersects(ob)) {
+                        itColl.remove();
+                        damaged = true;
                     }
                 }
-        
-                                // ★★★ 层次化障碍物生成 ★★★
-                                int prob = getCurrentObstacleProb();
-                                // ★ 主障碍物生成
-                                if (rand.nextInt(prob) == 0) {
-                                    int x = rand.nextInt(WIDTH - OBSTACLE_SIZE);
-                                    obstacles.add(new Rectangle(x, 0, OBSTACLE_SIZE, OBSTACLE_SIZE));
-                                }
-                                // ★★ 额外波次生成（随游戏进程逐步开放）
-                                if (shouldSpawnExtra()) {
-                                    int extraCount = getExtraSpawnCount();
-                                    for (int e = 0; e < extraCount; e++) {
-                                        int x = rand.nextInt(WIDTH - OBSTACLE_SIZE);
-                                        obstacles.add(new Rectangle(x, 0, OBSTACLE_SIZE, OBSTACLE_SIZE));
-                                    }
-                                }
-        
-                                                                // ★★★ 动态调整障碍物移动速度（每帧移动量）— 使用动态speedMs
-                                float speedMultiplier = getCurrentSpeedMultiplier();
-                                int currentSpeedMs = getCurrentSpeedMs();
-                                float pixelsPerMs = (float)obstacleStep / (float)currentSpeedMs;
-                                obstacleMovePerFrame = pixelsPerMs * FRAME_INTERVAL_MS * speedMultiplier;
-                                // ★ 子弹速度也随之动态提升（使用按难度设置的 bulletBaseSpeed）
-                                //   激光乘以3.0倍系数（原2.0），确保激光速度远大于障碍物速度
-                                bulletMovePerFrame = (bulletBaseSpeed / Math.max(currentSpeedMs, 80)) * FRAME_INTERVAL_MS * 3.0f * speedMultiplier;
-        
-                // 碰撞检测 - 无敌期间不受伤害
-        long now = System.currentTimeMillis();
-        if (now > invincibleUntil) {
-            playerRect.setBounds(playerX, playerY, PLAYER_SIZE, PLAYER_SIZE);
-            Iterator<Rectangle> itColl = obstacles.iterator();
-            boolean damaged = false;
-            while (itColl.hasNext()) {
-                Rectangle ob = itColl.next();
-                if (playerRect.intersects(ob)) {
-                    itColl.remove();
-                    damaged = true;
-                }
-            }
             
-            if (damaged) {
-                lives--;
-                invincibleUntil = now + INVINCIBLE_DURATION; // 进入无敌状态
-                if (lives <= 0) {
-                    gameRunning = false;
-                    gameTimer.stop();
-                    if (score > cachedHighScore) {
-                        saveHighScore(score);
+                if (damaged) {
+                    lives--;
+                    invincibleUntil = now + INVINCIBLE_DURATION;
+                    if (lives <= 0) {
+                        gameRunning = false;
+                        gameTimer.stop();
+                        if (score > cachedHighScore) {
+                            saveHighScore(score);
+                        }
+                        JOptionPane.showMessageDialog(this, "游戏结束！得分: " + score);
+                        game.showMenu();
+                        return;
                     }
-                    JOptionPane.showMessageDialog(this, "游戏结束！得分: " + score);
-                    game.showMenu();
-                    return;
                 }
             }
         }
-    }
     
         @Override
     protected void paintComponent(Graphics g) {
