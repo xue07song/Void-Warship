@@ -202,13 +202,29 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     private static final long INVINCIBLE_DURATION = 1200;
         private static final Color INVINCIBLE_COLOR = new Color(0, 255, 0, 80); // ★ 缓存无敌闪烁颜色
     
-    // ★ 暂停功能相关
+        // ★ 暂停功能相关
     private boolean paused = false;              // 是否处于暂停状态
     private long pauseStartTime = 0;             // 暂停开始时间
     private long totalPausedTime = 0;            // 累计暂停时间（毫秒）
     private Font pauseFont = new Font("微软雅黑", Font.BOLD, 48);
     private Font pauseHintFont = new Font("微软雅黑", Font.PLAIN, 24);
     private Color pauseOverlay = new Color(0, 0, 0, 180);  // 半透明黑色遮罩
+    
+    // ★★★ 游戏结束界面相关
+    private boolean gameOver = false;                // 是否处于游戏结束状态
+    private boolean newHighScore = false;            // 是否创造新纪录
+    private long gameOverTime = 0;                   // 游戏结束时间（用于闪烁动画）
+    private Font gameOverFont = new Font("微软雅黑", Font.BOLD, 52);
+    private Font gameOverSubFont = new Font("微软雅黑", Font.PLAIN, 26);
+    private Font gameOverBtnFont = new Font("微软雅黑", Font.BOLD, 22);
+    // 按钮矩形区域（运行时动态计算位置）
+    private Rectangle restartBtnRect = new Rectangle();
+    private Rectangle menuBtnRect = new Rectangle();
+    private static final int BTN_WIDTH = 260;
+    private static final int BTN_HEIGHT = 60;
+    // 游戏结束界面是否检测到按钮悬停
+    private boolean hoverRestart = false;
+    private boolean hoverMenu = false;
     
     // 星星类 - 用于星光闪烁特效
     private class Star {
@@ -241,11 +257,29 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         }
     }
     
-                public GamePanel(PlaneDodgeGame game) {
+                                public GamePanel(PlaneDodgeGame game) {
         this.game = game;
         setPreferredSize(new Dimension(WIDTH, HEIGHT));
         setFocusable(true);
         addKeyListener(this);
+        // ★★★ 添加鼠标监听器，支持游戏结束界面的按钮点击
+        addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                handleGameOverClick(e.getX(), e.getY());
+            }
+            @Override
+            public void mousePressed(MouseEvent e) {
+                // 点击时也响应，提升手感
+                handleGameOverClick(e.getX(), e.getY());
+            }
+        });
+        addMouseMotionListener(new MouseMotionAdapter() {
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                handleGameOverHover(e.getX(), e.getY());
+            }
+        });
         setBackground(Color.BLACK);
         // ★ 初始化渲染缓存
         cachedGradient = new GradientPaint(0, 0, new Color(10, 10, 30), 
@@ -471,7 +505,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         return 1;
     }
     
-                                                                public void resetGame() {
+                                                                                                                                public void resetGame() {
         gameRunning = true;
         lives = 3;
         score = 0;
@@ -494,6 +528,12 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         paused = false;
         totalPausedTime = 0;
         pauseStartTime = 0;
+        // ★★★ 游戏结束状态重置
+        gameOver = false;
+        newHighScore = false;
+        gameOverTime = 0;
+        hoverRestart = false;
+        hoverMenu = false;
         loadCachedHighScore();
     }
     
@@ -519,11 +559,20 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             }
         }
     
-                                @Override
+                                                                @Override
                                 public void actionPerformed(ActionEvent e) {
-                    if (!gameRunning) return;
-        
                     long now = System.currentTimeMillis();
+        
+                    // ★★★ 如果处于游戏结束状态，只更新星星并重绘（保持结束画面活跃）
+                    if (gameOver) {
+                        for (Star star : stars) {
+                            star.update();
+                        }
+                        repaint();
+                        return;
+                    }
+        
+                    if (!gameRunning) return;
         
                     // ★ 如果处于暂停状态，只绘制画面（但不更新任何游戏逻辑）
                     if (paused) {
@@ -652,7 +701,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             obstacleMovePerFrame = pixelsPerMs * FRAME_INTERVAL_MS * speedMultiplier;
             bulletMovePerFrame = (bulletBaseSpeed / Math.max(currentSpeedMs, 80)) * FRAME_INTERVAL_MS * 3.0f * speedMultiplier;
         
-            // 玩家碰撞检测 - 无敌期间不受伤害
+                        // 玩家碰撞检测 - 无敌期间不受伤害
             long now = System.currentTimeMillis();
             if (now > invincibleUntil) {
                 playerRect.setBounds(playerX, playerY, PLAYER_SIZE, PLAYER_SIZE);
@@ -670,13 +719,15 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
                     lives--;
                     invincibleUntil = now + INVINCIBLE_DURATION;
                     if (lives <= 0) {
+                        // ★★★ 改为游戏结束界面，不再弹JOptionPane
                         gameRunning = false;
                         gameTimer.stop();
                         if (score > cachedHighScore) {
+                            newHighScore = true;
                             saveHighScore(score);
                         }
-                        JOptionPane.showMessageDialog(this, "游戏结束！得分: " + score);
-                        game.showMenu();
+                        gameOver = true;
+                        gameOverTime = now;
                         return;
                     }
                 }
@@ -769,13 +820,18 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
             g.drawString("FPS: " + currentFps, WIDTH - 120, 30);
         }
         
-        // ★★★ 暂停状态绘制半透明遮罩和暂停提示
+                // ★★★ 暂停状态绘制半透明遮罩和暂停提示
         if (paused) {
             drawPauseOverlay(g);
         }
+        
+        // ★★★ 游戏结束状态绘制精美的结束界面
+        if (gameOver) {
+            drawGameOverOverlay(g);
+        }
     }
     
-    // ★★★ 新增：绘制暂停遮罩
+        // ★★★ 新增：绘制暂停遮罩
     private void drawPauseOverlay(Graphics g) {
         Graphics2D g2d = (Graphics2D) g;
         // 保存原始合成规则
@@ -826,11 +882,215 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         g2d.drawString(footText, footX, HEIGHT - 30);
     }
     
+    // ★★★ 新增：绘制精美的游戏结束界面
+    private void drawGameOverOverlay(Graphics g) {
+        Graphics2D g2d = (Graphics2D) g;
+        Composite originalComposite = g2d.getComposite();
+        
+        // 1. 半透明暗红色遮罩（比暂停的更暗，营造沉重感）
+        g2d.setComposite(AlphaComposite.SrcOver.derive(0.72f));
+        g2d.setColor(new Color(10, 0, 0));
+        g2d.fillRect(0, 0, WIDTH, HEIGHT);
+        g2d.setComposite(originalComposite);
+        
+        long now = System.currentTimeMillis();
+        long elapsed = now - gameOverTime;
+        
+        // 2. 绘制顶部标题区域 - 渐变色"游戏结束"
+        // 标题阴影
+        g2d.setFont(gameOverFont);
+        String titleText = "💥 游戏结束 💥";
+        FontMetrics fm = g2d.getFontMetrics();
+        int titleX = (WIDTH - fm.stringWidth(titleText)) / 2;
+        int titleBaseY = 140;
+        
+        // 标题阴影
+        g2d.setColor(new Color(80, 0, 0));
+        g2d.drawString(titleText, titleX + 3, titleBaseY + 3);
+        // 标题主色（闪烁效果）
+        boolean titleBlink = (elapsed / 400) % 2 == 0;
+        if (titleBlink) {
+            g2d.setColor(new Color(255, 60, 60));
+        } else {
+            g2d.setColor(new Color(255, 120, 80));
+        }
+        g2d.drawString(titleText, titleX, titleBaseY);
+        
+        // 3. 绘制成绩面板（白色半透明背景）
+        int panelWidth = 380;
+        int panelHeight = 180;
+        int panelX = (WIDTH - panelWidth) / 2;
+        int panelY = titleBaseY + 20;
+        
+        g2d.setComposite(AlphaComposite.SrcOver.derive(0.25f));
+        g2d.setColor(new Color(20, 20, 50));
+        g2d.fillRoundRect(panelX, panelY, panelWidth, panelHeight, 20, 20);
+        g2d.setComposite(originalComposite);
+        
+        // 面板边框
+        g2d.setColor(new Color(100, 100, 180, 120));
+        g2d.drawRoundRect(panelX, panelY, panelWidth, panelHeight, 20, 20);
+        
+        // 面板内文字
+        g2d.setFont(new Font("微软雅黑", Font.PLAIN, 24));
+        FontMetrics fm2 = g2d.getFontMetrics();
+        
+        // 最终得分
+        g2d.setColor(Color.WHITE);
+        String scoreText = "⭐ 最终得分:  " + score;
+        int scoreX = (WIDTH - fm2.stringWidth(scoreText)) / 2;
+        g2d.drawString(scoreText, scoreX, panelY + 45);
+        
+        // 最高分
+        g2d.setColor(new Color(255, 215, 0));
+        String highScoreText = "🏆 最高分:  " + cachedHighScore;
+        int hsX = (WIDTH - fm2.stringWidth(highScoreText)) / 2;
+        g2d.drawString(highScoreText, hsX, panelY + 85);
+        
+        // 新纪录提示（闪烁效果）
+        if (newHighScore) {
+            boolean newRecordBlink = (elapsed / 300) % 2 == 0;
+            if (newRecordBlink) {
+                g2d.setColor(new Color(255, 255, 0, 230));
+            } else {
+                g2d.setColor(new Color(255, 200, 0, 150));
+            }
+            g2d.setFont(new Font("微软雅黑", Font.BOLD, 28));
+            String newRecordText = "🎉 新纪录！🎉";
+            FontMetrics fm3 = g2d.getFontMetrics();
+            int nrX = (WIDTH - fm3.stringWidth(newRecordText)) / 2;
+            g2d.drawString(newRecordText, nrX, panelY + 135);
+        }
+        
+        // 4. 绘制两个按钮区域
+        int btnCenterY = panelY + panelHeight + 50;
+        int btnSpacing = 40;  // 按钮间距
+        int btnStartX = (WIDTH - BTN_WIDTH * 2 - btnSpacing) / 2;
+        
+        // 重新开始按钮位置
+        restartBtnRect.setBounds(btnStartX, btnCenterY, BTN_WIDTH, BTN_HEIGHT);
+        // 返回菜单按钮位置
+        menuBtnRect.setBounds(btnStartX + BTN_WIDTH + btnSpacing, btnCenterY, BTN_WIDTH, BTN_HEIGHT);
+        
+        // 绘制"再来一次"按钮
+        drawGameOverButton(g2d, restartBtnRect, "🔄 再来一次", new Color(0, 160, 60), new Color(0, 200, 80), hoverRestart, elapsed);
+        
+        // 绘制"返回菜单"按钮
+        drawGameOverButton(g2d, menuBtnRect, "🏠 返回菜单", new Color(160, 60, 0), new Color(200, 80, 0), hoverMenu, elapsed);
+        
+        // 5. 底部快捷键提示
+        g2d.setFont(new Font("微软雅黑", Font.PLAIN, 16));
+        g2d.setColor(new Color(255, 255, 255, 130));
+        boolean keyHintBlink = (elapsed / 500) % 2 == 0;
+        if (keyHintBlink) {
+            String hintText = "[ Enter / R ] 重新开始    [ Esc / M ] 返回菜单";
+            fm = g2d.getFontMetrics();
+            int hintX = (WIDTH - fm.stringWidth(hintText)) / 2;
+            g2d.drawString(hintText, hintX, HEIGHT - 40);
+        }
+        
+        g2d.setComposite(originalComposite);
+    }
+    
+    // ★★★ 绘制游戏结束界面的按钮
+    private void drawGameOverButton(Graphics2D g2d, Rectangle btnRect, String text, 
+                                     Color baseColor, Color hoverColor, boolean isHover, long elapsed) {
+        Composite originalComposite = g2d.getComposite();
+        
+        // 按钮背景
+        Color btnColor = isHover ? hoverColor : baseColor;
+        // 悬停时稍微提高透明度
+        float alpha = isHover ? 0.95f : 0.80f;
+        g2d.setComposite(AlphaComposite.SrcOver.derive(alpha));
+        g2d.setColor(btnColor);
+        g2d.fillRoundRect(btnRect.x, btnRect.y, btnRect.width, btnRect.height, 16, 16);
+        
+        // 按钮边框（悬停时更亮）
+        g2d.setComposite(originalComposite);
+        if (isHover) {
+            g2d.setColor(Color.WHITE);
+            g2d.setStroke(new BasicStroke(2.5f));
+        } else {
+            g2d.setColor(new Color(255, 255, 255, 80));
+            g2d.setStroke(new BasicStroke(1.5f));
+        }
+        g2d.drawRoundRect(btnRect.x, btnRect.y, btnRect.width, btnRect.height, 16, 16);
+        
+        // 按钮文字
+        g2d.setFont(gameOverBtnFont);
+        g2d.setStroke(new BasicStroke(1.0f)); // 重置描边
+        FontMetrics fm = g2d.getFontMetrics();
+        int textX = btnRect.x + (btnRect.width - fm.stringWidth(text)) / 2;
+        int textY = btnRect.y + (btnRect.height + fm.getAscent() - fm.getDescent()) / 2;
+        
+        // 文字阴影
+        g2d.setColor(new Color(0, 0, 0, 100));
+        g2d.drawString(text, textX + 1, textY + 1);
+        // 文字颜色
+        g2d.setColor(Color.WHITE);
+        g2d.drawString(text, textX, textY);
+    }
+    
+    // ★★★ 游戏结束界面的操作处理
+    private void handleGameOverClick(int mouseX, int mouseY) {
+        if (!gameOver) return;
+        if (restartBtnRect.contains(mouseX, mouseY)) {
+            restartGame();
+        } else if (menuBtnRect.contains(mouseX, mouseY)) {
+            backToMenu();
+        }
+    }
+    
+    private void handleGameOverHover(int mouseX, int mouseY) {
+        if (!gameOver) return;
+        boolean prevHoverRestart = hoverRestart;
+        boolean prevHoverMenu = hoverMenu;
+        hoverRestart = restartBtnRect.contains(mouseX, mouseY);
+        hoverMenu = menuBtnRect.contains(mouseX, mouseY);
+        // 悬停状态变化时切换鼠标指针
+        if (hoverRestart || hoverMenu) {
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        } else {
+            setCursor(Cursor.getDefaultCursor());
+        }
+    }
+    
+    // ★★★ 重新开始游戏
+    private void restartGame() {
+        gameOver = false;
+        newHighScore = false;
+        hoverRestart = false;
+        hoverMenu = false;
+        setCursor(Cursor.getDefaultCursor());
+        game.showGame();
+    }
+    
+    // ★★★ 返回主菜单
+    private void backToMenu() {
+        gameOver = false;
+        newHighScore = false;
+        hoverRestart = false;
+        hoverMenu = false;
+        setCursor(Cursor.getDefaultCursor());
+        game.showMenu();
+    }
+    
                                     
                 @Override
     public void keyPressed(KeyEvent e) {
-        if (!gameRunning) return;
         int code = e.getKeyCode();
+        
+        // ★★★ 游戏结束状态下：R键重新开始，M键返回菜单，ESC键返回菜单
+        if (gameOver) {
+            if (code == KeyEvent.VK_R || code == KeyEvent.VK_ENTER) {
+                restartGame();
+            } else if (code == KeyEvent.VK_M || code == KeyEvent.VK_ESCAPE) {
+                backToMenu();
+            }
+            return;
+        }
+        
+        if (!gameRunning) return;
         
         // ★★★ 暂停切换：P 键（无论是否暂停状态都响应）
         if (code == KeyEvent.VK_P) {
