@@ -126,11 +126,7 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         private PlaneDodgeGame game;
                 private static int speedMs = 500;        // 障碍物生成间隔（毫秒）
     private static int obstacleStep = 40;    // ★ 障碍物每次移动像素，按难度调整
-    private static int playerStep = 6;      // ★ 飞行器每帧移动步长（按难度调整，减半提升平滑度）
-    
-    // ★ 新增：玩家浮点位置（实现亚像素级平滑移动）
-    private float playerXFloat;
-    private float playerYFloat;
+    private static int playerStep = 12;      // ★ 飞行器每帧移动步长（按难度调整）
     private static float bulletBaseSpeed = 20f; // ★ 激光基础速度（按难度调整）
     private javax.swing.Timer gameTimer;
     
@@ -310,20 +306,20 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
     
                                                                 public static void setDifficulty(int diff) {
                                     switch(diff) {
-                                                                                case 0: // 简单（加速版）：初始约等于旧版普通，动态上涨更快
+                                        case 0: // 简单（加速版）：初始约等于旧版普通，动态上涨更快
                                             speedMs = 450; obstacleStep = 38;
-                                            playerStep = 6; bulletBaseSpeed = 25f;
+                                            playerStep = 11; bulletBaseSpeed = 25f;
                                             break;
                                         case 1: // 普通（加速版）：初始约等于旧版困难，动态上涨更快
                                             speedMs = 250; obstacleStep = 50;
-                                            playerStep = 8; bulletBaseSpeed = 40f;
+                                            playerStep = 16; bulletBaseSpeed = 40f;
                                             break;
                                         case 2: // 困难（加速版）：初始大幅提升，动态上涨极快
                                             speedMs = 150; obstacleStep = 68;
-                                            playerStep = 12; bulletBaseSpeed = 58f;
+                                            playerStep = 24; bulletBaseSpeed = 58f;
                                             break;
                                         default: speedMs = 500; obstacleStep = 40;
-                                            playerStep = 6; bulletBaseSpeed = 28f;
+                                            playerStep = 12; bulletBaseSpeed = 28f;
                                     }
                                     // ★ 重置实例的每帧移动量（由 startGame 重新计算）
                                 }
@@ -513,10 +509,8 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         gameRunning = true;
         lives = 3;
         score = 0;
-                playerX = WIDTH/2 - PLAYER_SIZE/2;
+        playerX = WIDTH/2 - PLAYER_SIZE/2;
         playerY = HEIGHT - PLAYER_SIZE - 10;
-        playerXFloat = playerX;  // ★ 初始化浮点位置
-        playerYFloat = playerY;
         obstacles.clear();
         bullets.clear();
         pressedKeys.clear(); // ★ 重置按键状态
@@ -1142,15 +1136,15 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
                code == KeyEvent.VK_D || code == KeyEvent.VK_RIGHT;
     }
     
-                                private void updateMovement() {
-        int step = playerStep;  // ★ 使用按难度设置的步长：简单=6, 普通=8, 困难=12
+                private void updateMovement() {
+        int step = playerStep;  // ★ 使用按难度设置的步长：简单=7, 普通=12, 困难=18
         boolean moveUp = pressedKeys.get(KeyEvent.VK_W) || pressedKeys.get(KeyEvent.VK_UP);
         boolean moveDown = pressedKeys.get(KeyEvent.VK_S) || pressedKeys.get(KeyEvent.VK_DOWN);
         boolean moveLeft = pressedKeys.get(KeyEvent.VK_A) || pressedKeys.get(KeyEvent.VK_LEFT);
         boolean moveRight = pressedKeys.get(KeyEvent.VK_D) || pressedKeys.get(KeyEvent.VK_RIGHT);
         
-        float dx = 0;
-        float dy = 0;
+        int dx = 0;
+        int dy = 0;
         if (moveLeft) dx -= step;
         if (moveRight) dx += step;
         if (moveUp) dy -= step;
@@ -1158,21 +1152,12 @@ class GamePanel extends JPanel implements KeyListener, ActionListener {
         
         // 斜向移动时速度归一化
         if (dx != 0 && dy != 0) {
-            dx = (float) Math.round(dx * DIAGONAL_FACTOR * 10f) / 10f; // 保留一位小数，更精细
-            dy = (float) Math.round(dy * DIAGONAL_FACTOR * 10f) / 10f;
+            dx = (int) Math.round(dx * DIAGONAL_FACTOR);
+            dy = (int) Math.round(dy * DIAGONAL_FACTOR);
         }
         
-        // ★ 使用浮点累加实现亚像素级平滑移动
-        playerXFloat += dx;
-        playerYFloat += dy;
-        
-        // 边界约束（浮点版本）
-        playerXFloat = Math.max(0, Math.min(WIDTH - PLAYER_SIZE, playerXFloat));
-        playerYFloat = Math.max(0, Math.min(HEIGHT - PLAYER_SIZE, playerYFloat));
-        
-        // 四舍五入取整用于碰撞检测和绘制
-        playerX = Math.round(playerXFloat);
-        playerY = Math.round(playerYFloat);
+                playerX = Math.max(0, Math.min(WIDTH - PLAYER_SIZE, playerX + dx));
+        playerY = Math.max(0, Math.min(HEIGHT - PLAYER_SIZE, playerY + dy));
     }
     
     private void loadCachedHighScore() {
