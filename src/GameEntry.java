@@ -5,6 +5,6 @@
 public class GameEntry {
     public static void main(String[] args) {
         javax.swing.SwingUtilities.invokeLater(
-            () -> new PlaneDodgeGame().setVisible(true));
+            () -> new com.planedodge.core.PlaneDodgeGame().setVisible(true));
     }
 }

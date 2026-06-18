@@ -16,7 +16,7 @@ public class GameConfig {
 
     // ---- Rendering ----
     public static final int FRAME_INTERVAL_MS = 8;           // ~120 FPS
-    public static final int STAR_COUNT = 150;
+    public static final int STAR_COUNT = 250;
 
     // ---- Player ----
     public static final int PLAYER_SIZE = 40;

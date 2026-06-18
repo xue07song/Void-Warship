@@ -4,13 +4,18 @@ import com.planedodge.config.GameConfig;
 import com.planedodge.core.PlaneDodgeGame;
 import com.planedodge.model.Star;
 import com.planedodge.util.ScoreManager;
+import com.planedodge.util.SoundManager;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.image.BufferedImage;
 import java.util.*;
 import java.util.List;
 import java.util.BitSet;
+import javax.imageio.ImageIO;
+import java.io.File;
+import java.io.IOException;
 
 /**
  * The main gameplay panel.
@@ -73,6 +78,11 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
     private int currentFps;
     private long lastFpsTime;
 
+    // ---- Images ----
+    private Image backgroundImage;
+    private Image obstacleImage;
+    private Image playerImage;
+
     // ---- Cached colours / fonts ----
     private final Font uiFont            = new Font("微软雅黑", Font.BOLD, 20);
     private final Font pauseFont         = new Font("微软雅黑", Font.BOLD, 48);
@@ -81,11 +91,13 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
     private final Font gameOverSubFont   = new Font("微软雅黑", Font.PLAIN, 26);
     private final Font gameOverBtnFont   = new Font("微软雅黑", Font.BOLD, 22);
 
-    // ---- Game-over button rectangles ----
+    // ---- Button rectangles ----
     private final Rectangle restartBtnRect = new Rectangle();
     private final Rectangle menuBtnRect    = new Rectangle();
+    private final Rectangle pauseMenuBtnRect = new Rectangle();
     private boolean hoverRestart;
     private boolean hoverMenu;
+    private boolean hoverPauseMenu;
 
     // ---------- Constants ----------
     private static final int BTN_WIDTH  = 260;
@@ -106,11 +118,55 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         addMouseListener(mouseHandler);
         addMouseMotionListener(mouseHandler);
 
+        // 加载图片素材和音效
+        loadImages();
+        SoundManager.init();
+
         initStars();
 
         // Safety: start with valid values so rendering doesn't NPE
         setDifficulty(0);
         resetGame();
+    }
+
+    /** 加载 imagines/ 目录下的所有图片素材 */
+    private void loadImages() {
+        // 搜索路径：兼容从 bin/ 或项目根目录运行
+        String[] basePaths = {"imagines/", "../imagines/"};
+
+        for (String base : basePaths) {
+            // 背景
+            if (backgroundImage == null) {
+                backgroundImage = tryLoadImage(base + "游戏背景.png",
+                    GameConfig.WINDOW_WIDTH, GameConfig.WINDOW_HEIGHT);
+            }
+            // 障碍物（缩放到 OBSTACLE_SIZE）
+            if (obstacleImage == null) {
+                obstacleImage = tryLoadImage(base + "障碍物.jpg",
+                    GameConfig.OBSTACLE_SIZE, GameConfig.OBSTACLE_SIZE);
+            }
+            // 飞行器（缩放到 PLAYER_SIZE）
+            if (playerImage == null) {
+                playerImage = tryLoadImage(base + "飞行器.jpg",
+                    GameConfig.PLAYER_SIZE, GameConfig.PLAYER_SIZE);
+            }
+            // 全部加载完成就退出
+            if (backgroundImage != null && obstacleImage != null && playerImage != null) {
+                return;
+            }
+        }
+    }
+
+    /** 尝试加载一张图片，失败返回 null */
+    private Image tryLoadImage(String path, int width, int height) {
+        try {
+            File f = new File(path);
+            if (f.exists()) {
+                Image img = ImageIO.read(f);
+                return img.getScaledInstance(width, height, Image.SCALE_SMOOTH);
+            }
+        } catch (IOException ignored) { }
+        return null;
     }
 
     // ============================================================
@@ -153,6 +209,7 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         gameOverTime    = 0L;
         hoverRestart = false;
         hoverMenu    = false;
+        hoverPauseMenu = false;
 
         playerX = GameConfig.WINDOW_WIDTH  / 2 - GameConfig.PLAYER_SIZE / 2;
         playerY = GameConfig.WINDOW_HEIGHT - GameConfig.PLAYER_SIZE - 10;
@@ -174,6 +231,7 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         calculatePerFrameMovement();
         gameTimer = new javax.swing.Timer(GameConfig.FRAME_INTERVAL_MS, this);
         gameTimer.start();
+        SoundManager.playBgm("bgm");  // 开始循环播放背景音乐
     }
 
     // ============================================================
@@ -203,19 +261,29 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         int base = speedMs;
         int reduction = 0;
 
-        if (score > 80) {
+        // 根据难度等级调整加速阈值（困难模式减慢）
+        int scoreThreshold1 = (difficultyLevel == 2) ? 200 : (difficultyLevel == 1 ? 140 : 80);
+        int scoreDiv1 = (difficultyLevel == 2) ? 100 : (difficultyLevel == 1 ? 70 : 50);
+        int scoreThreshold2 = (difficultyLevel == 2) ? 500 : (difficultyLevel == 1 ? 350 : 250);
+        int scoreDiv2 = (difficultyLevel == 2) ? 160 : (difficultyLevel == 1 ? 110 : 80);
+        int timeThreshold1 = (difficultyLevel == 2) ? 50 : (difficultyLevel == 1 ? 35 : 25);
+        int timeDiv1 = (difficultyLevel == 2) ? 30 : (difficultyLevel == 1 ? 20 : 15);
+        int timeThreshold2 = (difficultyLevel == 2) ? 140 : (difficultyLevel == 1 ? 100 : 70);
+        int timeDiv2 = (difficultyLevel == 2) ? 50 : (difficultyLevel == 1 ? 35 : 25);
+
+        if (score > scoreThreshold1) {
             reduction = Math.max(reduction,
-                Math.min((score - 80) / 50, 8) * 25);
+                Math.min((score - scoreThreshold1) / scoreDiv1, 8) * 25);
         }
-        if (score > 250) {
-            reduction += Math.min((score - 250) / 80, 5) * 15;
+        if (score > scoreThreshold2) {
+            reduction += Math.min((score - scoreThreshold2) / scoreDiv2, 5) * 15;
         }
-        if (sec > 25) {
+        if (sec > timeThreshold1) {
             reduction = Math.max(reduction,
-                Math.min((int)(sec - 25) / 15, 8) * 25);
+                Math.min((int)(sec - timeThreshold1) / timeDiv1, 8) * 25);
         }
-        if (sec > 70) {
-            reduction += Math.min((int)(sec - 70) / 25, 5) * 15;
+        if (sec > timeThreshold2) {
+            reduction += Math.min((int)(sec - timeThreshold2) / timeDiv2, 5) * 15;
         }
 
         int minMs = (difficultyLevel == 0) ? 150 :
@@ -285,8 +353,11 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
 
     /** Compute current difficulty stage index (0..5+) for UI. */
     private int getDifficultyStage() {
+        // 根据不同难度降低阶段切换速度
+        int scoreDiv = (difficultyLevel == 2) ? 300 : (difficultyLevel == 1 ? 200 : 100);
+        int timeDiv = (difficultyLevel == 2) ? 70 : (difficultyLevel == 1 ? 50 : 30);
         return Math.min(8, Math.max(0,
-            Math.max(score / 100, (int)(effectiveElapsed() / 1000 / 30))));
+            Math.max(score / scoreDiv, (int)(effectiveElapsed() / 1000 / timeDiv))));
     }
 
     // ============================================================
@@ -319,6 +390,17 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         }
     }
 
+    /** 从暂停界面返回菜单 */
+    private void pauseBackToMenu() {
+        paused = false;
+        totalPausedTime += System.currentTimeMillis() - pauseStartTime;
+        if (gameTimer != null && gameTimer.isRunning()) {
+            gameTimer.stop();
+        }
+        SoundManager.stop("bgm");  // 停止背景音乐
+        game.showMenu();
+    }
+
     // ============================================================
     // Game-over helpers
     // ============================================================
@@ -338,22 +420,37 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         hoverRestart = false;
         hoverMenu    = false;
         setCursor(Cursor.getDefaultCursor());
+        SoundManager.stop("bgm");  // 停止背景音乐
         game.showMenu();
     }
 
     private void handleGameOverClick(int mx, int my) {
-        if (!gameOver) return;
-        if (restartBtnRect.contains(mx, my)) restartGame();
-        else if (menuBtnRect.contains(mx, my)) backToMenu();
+        if (gameOver) {
+            if (restartBtnRect.contains(mx, my)) restartGame();
+            else if (menuBtnRect.contains(mx, my)) backToMenu();
+        }
+        // 暂停界面点击返回菜单
+        if (paused && pauseMenuBtnRect.contains(mx, my)) {
+            pauseBackToMenu();
+        }
     }
 
     private void handleGameOverHover(int mx, int my) {
-        if (!gameOver) return;
-        boolean prevR = hoverRestart;
-        boolean prevM = hoverMenu;
-        hoverRestart = restartBtnRect.contains(mx, my);
-        hoverMenu    = menuBtnRect.contains(mx, my);
-        if (hoverRestart || hoverMenu) {
+        boolean handCursor = false;
+
+        if (gameOver) {
+            hoverRestart = restartBtnRect.contains(mx, my);
+            hoverMenu    = menuBtnRect.contains(mx, my);
+            if (hoverRestart || hoverMenu) handCursor = true;
+        }
+
+        // 暂停界面按钮悬停
+        if (paused) {
+            hoverPauseMenu = pauseMenuBtnRect.contains(mx, my);
+            if (hoverPauseMenu) handCursor = true;
+        }
+
+        if (handCursor) {
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         } else {
             setCursor(Cursor.getDefaultCursor());
@@ -452,6 +549,7 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
                     oit.remove();           // obstacle destroyed
                     bit.remove();           // bullet consumed
                     score += 20;
+                    SoundManager.play("explosion");  // 障碍物摧毁音效
                     hit = true;
                     break;
                 }
@@ -525,6 +623,7 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
 
             if (damaged) {
                 lives--;
+                SoundManager.play("hit");  // 掉血音效
                 invincibleUntil = now + GameConfig.INVINCIBLE_DURATION;
                 if (lives <= 0) {
                     gameRunning = false;
@@ -532,6 +631,7 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
                     newHighScore = scoreManager.saveIfNew(score);
                     gameOver = true;
                     gameOverTime = now;
+                    SoundManager.stop("bgm");  // 死亡后停止背景音乐
                 }
             }
         }
@@ -584,20 +684,30 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                              RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // ---- Background ----
-        GradientPaint grad = new GradientPaint(
-            0, 0, GameConfig.COLOR_BACKGROUND_TOP,
-            0, GameConfig.WINDOW_HEIGHT, GameConfig.COLOR_BACKGROUND_BOTTOM);
-        g2d.setPaint(grad);
-        g2d.fillRect(0, 0, GameConfig.WINDOW_WIDTH, GameConfig.WINDOW_HEIGHT);
+        // ---- Background（优先显示图片，没有则用纯色渐变） ----
+        if (backgroundImage != null) {
+            g2d.drawImage(backgroundImage, 0, 0, null);
+        } else {
+            GradientPaint grad = new GradientPaint(
+                0, 0, GameConfig.COLOR_BACKGROUND_TOP,
+                0, GameConfig.WINDOW_HEIGHT, GameConfig.COLOR_BACKGROUND_BOTTOM);
+            g2d.setPaint(grad);
+            g2d.fillRect(0, 0, GameConfig.WINDOW_WIDTH, GameConfig.WINDOW_HEIGHT);
+        }
 
         // ---- Stars ----
         for (Star s : stars) s.draw(g2d);
 
-        // ---- Obstacles ----
-        g2d.setColor(Color.RED);
-        for (Rectangle ob : obstacles) {
-            g2d.fillRect(ob.x, ob.y, GameConfig.OBSTACLE_SIZE, GameConfig.OBSTACLE_SIZE);
+        // ---- Obstacles（优先用图片，否则红色方块） ----
+        if (obstacleImage != null) {
+            for (Rectangle ob : obstacles) {
+                g2d.drawImage(obstacleImage, ob.x, ob.y, null);
+            }
+        } else {
+            g2d.setColor(Color.RED);
+            for (Rectangle ob : obstacles) {
+                g2d.fillRect(ob.x, ob.y, GameConfig.OBSTACLE_SIZE, GameConfig.OBSTACLE_SIZE);
+            }
         }
 
         // ---- Bullets ----
@@ -606,25 +716,36 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
             g2d.fillOval(b.x, b.y, GameConfig.BULLET_SIZE, GameConfig.BULLET_SIZE);
         }
 
-        // ---- Player (invincibility blink) ----
+        // ---- Player（优先用图片，否则绿色三角形；无敌时闪烁半透明） ----
         long now = System.currentTimeMillis();
         boolean inv = now < invincibleUntil;
-        if (inv && (now / 100) % 2 == 0) {
-            g2d.setColor(GameConfig.COLOR_INVINCIBLE);
+        if (playerImage != null) {
+            if (inv && (now / 100) % 2 == 0) {
+                // 无敌闪烁：绘制半透明
+                g2d.setComposite(AlphaComposite.SrcOver.derive(0.4f));
+            }
+            g2d.drawImage(playerImage, playerX, playerY, null);
+            if (inv && (now / 100) % 2 == 0) {
+                g2d.setComposite(AlphaComposite.SrcOver.derive(1.0f));
+            }
         } else {
-            g2d.setColor(Color.GREEN);
+            if (inv && (now / 100) % 2 == 0) {
+                g2d.setColor(GameConfig.COLOR_INVINCIBLE);
+            } else {
+                g2d.setColor(Color.GREEN);
+            }
+            int[] xp = {
+                playerX + GameConfig.PLAYER_SIZE / 2,
+                playerX + GameConfig.PLAYER_SIZE - 5,
+                playerX + 5
+            };
+            int[] yp = {
+                playerY,
+                playerY + GameConfig.PLAYER_SIZE - 5,
+                playerY + GameConfig.PLAYER_SIZE - 5
+            };
+            g2d.fillPolygon(xp, yp, 3);
         }
-        int[] xp = {
-            playerX + GameConfig.PLAYER_SIZE / 2,
-            playerX + GameConfig.PLAYER_SIZE - 5,
-            playerX + 5
-        };
-        int[] yp = {
-            playerY,
-            playerY + GameConfig.PLAYER_SIZE - 5,
-            playerY + GameConfig.PLAYER_SIZE - 5
-        };
-        g2d.fillPolygon(xp, yp, 3);
 
         // ---- HUD ----
         g2d.setColor(Color.WHITE);
@@ -677,7 +798,7 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         String title = "暂停";
         FontMetrics fm = g2d.getFontMetrics();
         int tx = (GameConfig.WINDOW_WIDTH - fm.stringWidth(title)) / 2;
-        int ty = GameConfig.WINDOW_HEIGHT / 2 - 60;
+        int ty = GameConfig.WINDOW_HEIGHT / 2 - 80;
         g2d.drawString(title, tx, ty);
 
         g2d.setFont(pauseHintFont);
@@ -691,6 +812,15 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         String info = "生命: " + lives + "  得分: " + score + "  障碍物: " + obstacles.size();
         fm = g2d.getFontMetrics();
         g2d.drawString(info, (GameConfig.WINDOW_WIDTH - fm.stringWidth(info)) / 2, ty + 100);
+
+        // ---- 返回菜单按钮 ----
+        int btnW = 220, btnH = 50;
+        int btnX = (GameConfig.WINDOW_WIDTH - btnW) / 2;
+        int btnY = ty + 140;
+        pauseMenuBtnRect.setBounds(btnX, btnY, btnW, btnH);
+
+        drawButton(g2d, pauseMenuBtnRect, "返回菜单",
+                   new Color(160, 60, 0), new Color(200, 80, 0), hoverPauseMenu);
 
         g2d.setComposite(orig);
     }
@@ -848,6 +978,7 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
                     GameConfig.BULLET_SIZE, GameConfig.BULLET_SIZE
                 ));
                 lastShotTime = now;
+                SoundManager.play("shoot");  // 播放射击音效
             }
             return;
         }
